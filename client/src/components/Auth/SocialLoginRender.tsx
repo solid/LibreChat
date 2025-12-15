@@ -1,3 +1,6 @@
+import { useState, useEffect } from 'react';
+import { useSolidAuth } from '@ldo/solid-react';
+import { useSearchParams } from 'react-router-dom';
 import {
   GoogleIcon,
   FacebookIcon,
@@ -6,9 +9,11 @@ import {
   DiscordIcon,
   AppleIcon,
   SamlIcon,
+  SolidIcon,
 } from '@librechat/client';
 
 import SocialButton from './SocialButton';
+import SolidProviderModal from './SolidProviderModal';
 
 import { useLocalize } from '~/hooks';
 
@@ -20,6 +25,43 @@ function SocialLoginRender({
   startupConfig: TStartupConfig | null | undefined;
 }) {
   const localize = useLocalize();
+  const [isSolidModalOpen, setIsSolidModalOpen] = useState(false);
+  const { login, session } = useSolidAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+
+  // Check if we're processing an OIDC callback
+  const hasOidcCallback = searchParams.has('code') && searchParams.has('state');
+  
+  // Don't show modal or allow login if we're processing a callback or already logged in
+  useEffect(() => {
+    if (hasOidcCallback || session.isLoggedIn) {
+      setIsSolidModalOpen(false);
+    }
+  }, [hasOidcCallback, session.isLoggedIn]);
+
+  const handleSolidClick = () => {
+    setIsSolidModalOpen(true);
+  };
+
+  const handleProviderSelect = async (issuer: string) => {
+    // Don't initiate login if we're already processing a callback
+    if (hasOidcCallback || session.isLoggedIn) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const redirectUrl = `${window.location.origin}/c/new`;
+      await login(issuer, { redirectUrl });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+      setIsLoading(false);
+    }
+  };
 
   if (!startupConfig) {
     return null;
@@ -115,6 +157,16 @@ function SocialLoginRender({
         id="saml"
       />
     ),
+    solid: (
+      <SocialButton
+        key="solid"
+        enabled={true}
+        Icon={SolidIcon}
+        label={localize('com_auth_solid_login')}
+        id="solid"
+        onClick={handleSolidClick}
+      />
+    ),
   };
 
   return (
@@ -131,8 +183,16 @@ function SocialLoginRender({
           </>
         )}
         <div className="mt-2">
+          {providerComponents.solid}
           {startupConfig.socialLogins?.map((provider) => providerComponents[provider] || null)}
         </div>
+        <SolidProviderModal
+          open={isSolidModalOpen}
+          onOpenChange={setIsSolidModalOpen}
+          onProviderSelect={handleProviderSelect}
+          isLoading={isLoading}
+          error={error}
+        />
       </>
     )
   );

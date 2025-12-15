@@ -147,6 +147,119 @@ Click on the thumbnail to open the video☝️
 
 ---
 
+## 🚀 Development Setup
+
+### Prerequisites
+
+- **Node.js 20.x** - [Download](https://nodejs.org/)
+- **MongoDB** - [Install MongoDB Community Edition](https://www.mongodb.com/docs/manual/administration/install-community/) or use Docker
+- **TypeScript** (globally) - `npm i -g typescript`
+- **Docker** (optional, for MongoDB) - [Download Docker](https://www.docker.com/)
+
+### Quick Start
+
+1. **Clone and install dependencies:**
+   ```bash
+   git clone https://github.com/danny-avila/LibreChat.git
+   cd LibreChat
+   npm ci
+   ```
+
+2. **Build shared packages:**
+   ```bash
+   npm run build:packages
+   ```
+
+3. **Set up environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` and ensure at minimum:
+   ```env
+   MONGO_URI=mongodb://localhost:27017/LibreChat
+   PORT=3080
+   HOST=localhost
+   NODE_ENV=development
+   JWT_SECRET=your-random-secret-here
+   JWT_REFRESH_SECRET=your-random-secret-here
+   SESSION_SECRET=your-random-secret-here
+   ```
+
+4. **Set up configuration file:**
+   ```bash
+   cp librechat.example.yaml librechat.yaml
+   ```
+
+5. **Start MongoDB:**
+   
+   **Option A: Using Docker (Recommended)**
+   ```bash
+   docker run -d --name librechat-mongodb -p 27017:27017 mongo:latest
+   ```
+   
+   **Option B: Local Installation**
+   ```bash
+   # macOS
+   brew services start mongodb-community
+   
+   # Linux
+   sudo systemctl start mongod
+   ```
+
+6. **Build the client (required for backend to serve static files):**
+   ```bash
+   npm run build:client-package
+   cd client && npm run build && cd ..
+   ```
+
+7. **Start the development servers:**
+   
+   **Terminal 1 - Backend:**
+   ```bash
+   npm run backend:dev
+   ```
+   
+   **Terminal 2 - Frontend:**
+   ```bash
+   npm run frontend:dev
+   ```
+
+8. **Access the application:**
+   - Frontend: http://localhost:3090
+   - Backend API: http://localhost:3080
+
+### Development Commands
+
+- `npm run frontend:dev` - Start frontend dev server (Vite with HMR)
+- `npm run backend:dev` - Start backend dev server (nodemon with auto-reload)
+- `npm run build:packages` - Build all shared packages
+- `npm run build:client` - Build frontend for production
+- `npm run test:client` - Run frontend tests
+- `npm run test:api` - Run backend tests
+- `npm run lint` - Check for linting errors
+- `npm run lint:fix` - Auto-fix linting errors
+
+### Troubleshooting
+
+- **Backend won't start?** 
+  - Check MongoDB is running: `mongosh` should connect
+  - Verify `.env` file has `MONGO_URI` set
+  - Ensure `librechat.yaml` exists (copy from `librechat.example.yaml`)
+  - Check that `client/dist/index.html` exists (run `cd client && npm run build`)
+
+- **Frontend can't connect to backend?**
+  - Ensure backend is running on port 3080
+  - Check browser console for errors
+  - Verify Vite proxy configuration in `client/vite.config.ts`
+
+- **Packages not found errors?**
+  - Run `npm run build:packages` to rebuild shared packages
+
+For more detailed information, see the [Contributing Guide](.github/CONTRIBUTING.md) or [Documentation](https://docs.librechat.ai).
+
+---
+
 ## 🌐 Resources
 
 **GitHub Repo:**

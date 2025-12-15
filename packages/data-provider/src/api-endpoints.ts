@@ -136,6 +136,8 @@ export const logout = () => `${BASE_URL}/api/auth/logout`;
 
 export const register = () => `${BASE_URL}/api/auth/register`;
 
+export const solidAuth = () => `${BASE_URL}/api/auth/solid`;
+
 export const loginFacebook = () => `${BASE_URL}/api/auth/facebook`;
 
 export const loginGoogle = () => `${BASE_URL}/api/auth/google`;
