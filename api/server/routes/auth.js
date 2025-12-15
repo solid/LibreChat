@@ -17,6 +17,7 @@ const {
 const { verify2FAWithTempToken } = require('~/server/controllers/auth/TwoFactorAuthController');
 const { logoutController } = require('~/server/controllers/auth/LogoutController');
 const { loginController } = require('~/server/controllers/auth/LoginController');
+const { solidAuthController } = require('~/server/controllers/auth/SolidAuthController');
 const { getAppConfig } = require('~/server/services/Config');
 const middleware = require('~/server/middleware');
 const { Balance } = require('~/db/models');
@@ -71,5 +72,14 @@ router.post('/2fa/disable', middleware.requireJwtAuth, disable2FA);
 router.post('/2fa/backup/regenerate', middleware.requireJwtAuth, regenerateBackupCodes);
 
 router.get('/graph-token', middleware.requireJwtAuth, graphTokenController);
+
+// Solid authentication endpoint
+router.post(
+  '/solid',
+  middleware.logHeaders,
+  middleware.loginLimiter,
+  middleware.checkBan,
+  solidAuthController,
+);
 
 module.exports = router;

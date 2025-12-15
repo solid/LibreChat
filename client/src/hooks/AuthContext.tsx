@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { debounce } from 'lodash';
 import { useRecoilState } from 'recoil';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { setTokenHeader, SystemRoles } from 'librechat-data-provider';
 import type * as t from 'librechat-data-provider';
 import {
@@ -38,6 +38,7 @@ const AuthContextProvider = ({
   const [error, setError] = useState<string | undefined>(undefined);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const logoutRedirectRef = useRef<string | undefined>(undefined);
+  const [searchParams] = useSearchParams();
 
   const { data: userRole = null } = useGetRole(SystemRoles.USER, {
     enabled: !!(isAuthenticated && (user?.role ?? '')),
@@ -47,6 +48,25 @@ const AuthContextProvider = ({
   });
 
   const navigate = useNavigate();
+  
+  // Check if we have Solid OIDC callback params
+  const hasSolidCallback = () => {
+    if (typeof window !== 'undefined') {
+      const authInProgress = sessionStorage.getItem('solid_auth_in_progress') === 'true';
+      if (authInProgress) {
+        return true;
+      }
+    }
+    // Fallback to window.location.search (most reliable, works immediately)
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('code') && urlParams.has('state')) {
+        return true;
+      }
+    }
+    // Check useSearchParams (reactive to URL changes)
+    return searchParams.has('code') && searchParams.has('state');
+  };
 
   const setUserContext = useMemo(
     () =>
@@ -91,7 +111,10 @@ const AuthContextProvider = ({
     onError: (error: TResError | unknown) => {
       const resError = error as TResError;
       doSetError(resError.message);
-      navigate('/login', { replace: true });
+
+      if (!hasSolidCallback()) {
+        navigate('/login', { replace: true });
+      }
     },
   });
   const logoutUser = useLogoutUserMutation({
@@ -146,7 +169,10 @@ const AuthContextProvider = ({
           if (authConfig?.test === true) {
             return;
           }
-          navigate('/login');
+
+          if (!hasSolidCallback()) {
+            navigate('/login');
+          }
         }
       },
       onError: (error) => {
@@ -154,23 +180,33 @@ const AuthContextProvider = ({
         if (authConfig?.test === true) {
           return;
         }
-        navigate('/login');
+
+        if (!hasSolidCallback()) {
+          navigate('/login');
+        }
       },
     });
-  }, []);
+  }, [searchParams, navigate, authConfig, setUserContext]);
 
   useEffect(() => {
     if (userQuery.data) {
       setUser(userQuery.data);
     } else if (userQuery.isError) {
       doSetError((userQuery.error as Error).message);
-      navigate('/login', { replace: true });
+
+      if (!hasSolidCallback()) {
+        navigate('/login', { replace: true });
+      }
     }
     if (error != null && error && isAuthenticated) {
       doSetError(undefined);
     }
+    // Don't call silentRefresh if we have Solid callback params (authentication in progress)
+    // This prevents unnecessary token refresh attempts during Solid OIDC flow
     if (token == null || !token || !isAuthenticated) {
-      silentRefresh();
+      if (!hasSolidCallback()) {
+        silentRefresh();
+      }
     }
   }, [
     token,
@@ -183,6 +219,7 @@ const AuthContextProvider = ({
     navigate,
     silentRefresh,
     setUserContext,
+    searchParams,
   ]);
 
   useEffect(() => {

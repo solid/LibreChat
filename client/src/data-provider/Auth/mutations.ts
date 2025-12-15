@@ -52,6 +52,29 @@ export const useLoginUserMutation = (
   });
 };
 
+export const useSolidAuthMutation = (
+  options?: t.MutationOptions<t.TLoginResponse, { webId: string }, unknown, unknown>,
+): UseMutationResult<t.TLoginResponse, unknown, { webId: string }, unknown> => {
+  const queryClient = useQueryClient();
+  const clearStates = useClearStates();
+  const resetDefaultPreset = useResetRecoilState(store.defaultPreset);
+  const setQueriesEnabled = useSetRecoilState<boolean>(store.queriesEnabled);
+  return useMutation([MutationKeys.loginUser, 'solid'], {
+    mutationFn: (payload: { webId: string }) => dataService.solidAuth(payload),
+    ...(options || {}),
+    onMutate: (vars) => {
+      resetDefaultPreset();
+      clearStates();
+      queryClient.removeQueries();
+      options?.onMutate?.(vars);
+    },
+    onSuccess: (...args) => {
+      setQueriesEnabled(true);
+      options?.onSuccess?.(...args);
+    },
+  });
+};
+
 export const useRefreshTokenMutation = (
   options?: t.MutationOptions<t.TRefreshTokenResponse | undefined, undefined, unknown, unknown>,
 ): UseMutationResult<t.TRefreshTokenResponse | undefined, unknown, undefined, unknown> => {

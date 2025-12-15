@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Spinner } from '@librechat/client';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Constants, EModelEndpoint } from 'librechat-data-provider';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import type { TPreset } from 'librechat-data-provider';
@@ -17,6 +17,21 @@ import store from '~/store';
 export default function ChatRoute() {
   const { data: startupConfig } = useGetStartupConfig();
   const { isAuthenticated, user } = useAuthRedirect();
+  const [searchParams] = useSearchParams();
+  
+  // Check if we have Solid OIDC callback params or auth in progress
+  const checkSolidAuth = () => {
+    if (typeof window !== 'undefined') {
+      const authInProgress = sessionStorage.getItem('solid_auth_in_progress') === 'true';
+      if (authInProgress) {
+        return true;
+      }
+    }
+    // Fallback to URL params
+    return searchParams.has('code') && searchParams.has('state');
+  };
+  
+  const hasSolidCallback = checkSolidAuth();
 
   const setIsTemporary = useRecoilCallback(
     ({ set }) =>
@@ -131,7 +146,8 @@ export default function ChatRoute() {
     );
   }
 
-  if (!isAuthenticated) {
+  // Allow rendering if we have Solid callback params (authentication in progress)
+  if (!isAuthenticated && !hasSolidCallback) {
     return null;
   }
 

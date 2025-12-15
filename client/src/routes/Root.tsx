@@ -20,6 +20,7 @@ import { TermsAndConditionsModal } from '~/components/ui';
 import { Nav, MobileNav } from '~/components/Nav';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
+import { Spinner } from '@librechat/client';
 
 export default function Root() {
   const [showTerms, setShowTerms] = useState(false);
@@ -60,7 +61,37 @@ export default function Root() {
     logout('/login?redirect=false');
   };
 
-  if (!isAuthenticated) {
+  // Check if we have Solid OIDC callback params or auth in progress
+  const checkSolidAuth = () => {
+    if (typeof window !== 'undefined') {
+      const authInProgress = sessionStorage.getItem('solid_auth_in_progress') === 'true';
+      if (authInProgress) {
+        return true;
+      }
+    }
+    // Fallback to URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.has('code') && urlParams.has('state');
+  };
+  
+  const hasSolidCallback = checkSolidAuth();
+  
+  // If auth is in progress, render a loading state instead of null
+  // This prevents React Router from thinking the route doesn't match
+  if (!isAuthenticated && hasSolidCallback) {
+    return (
+      <div className="flex h-screen items-center justify-center" aria-live="polite" role="status">
+        <div className="flex flex-col items-center gap-4">
+          <Spinner className="h-8 w-8 text-green-500" />
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Authenticating with Solid...
+          </p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!isAuthenticated && !hasSolidCallback) {
     return null;
   }
 

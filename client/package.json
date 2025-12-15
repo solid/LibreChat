@@ -35,6 +35,7 @@
     "@dicebear/collection": "^9.2.2",
     "@dicebear/core": "^9.2.2",
     "@headlessui/react": "^2.1.2",
+    "@ldo/solid-react": "^1.0.0-alpha.33",
     "@librechat/client": "*",
     "@marsidev/react-turnstile": "^1.1.0",
     "@mcp-ui/client": "^5.7.0",

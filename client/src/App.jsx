@@ -13,6 +13,7 @@ import { getThemeFromEnv } from './utils/getThemeFromEnv';
 import { initializeFontSize } from '~/store/fontSize';
 import { LiveAnnouncer } from '~/a11y';
 import { router } from './routes';
+import SolidAuthProvider from '~/components/Auth/SolidAuthProvider';
 
 const App = () => {
   const { setError } = useApiErrorBoundary();
@@ -51,7 +52,9 @@ const App = () => {
             <RadixToast.Provider>
               <ToastProvider>
                 <DndProvider backend={HTML5Backend}>
-                  <RouterProvider router={router} />
+                  <SolidAuthProvider>
+                    <RouterProvider router={router} />
+                  </SolidAuthProvider>
                   <WakeLockManager />
                   <ReactQueryDevtools initialIsOpen={false} position="top-right" />
                   <Toast />
