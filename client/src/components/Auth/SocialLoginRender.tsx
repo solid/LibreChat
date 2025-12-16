@@ -184,7 +184,13 @@ function SocialLoginRender({
         )}
         <div className="mt-2">
           {providerComponents.solid}
-          {startupConfig.socialLogins?.map((provider) => providerComponents[provider] || null)}
+          {startupConfig.socialLogins?.map((provider) => {
+            // Skip 'solid' since it's already rendered above
+            if (provider === 'solid') {
+              return null;
+            }
+            return providerComponents[provider] || null;
+          })}
         </div>
         <SolidProviderModal
           open={isSolidModalOpen}
