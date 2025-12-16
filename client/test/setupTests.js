@@ -74,3 +74,17 @@ jest.mock('react-i18next', () => {
     },
   };
 });
+
+// Mock @ldo/solid-react for tests
+jest.mock('@ldo/solid-react', () => {
+  return {
+    useSolidAuth: jest.fn(() => ({
+      login: jest.fn(),
+      session: {
+        isLoggedIn: false,
+        webId: null,
+      },
+    })),
+    BrowserSolidLdoProvider: ({ children }) => children,
+  };
+});
