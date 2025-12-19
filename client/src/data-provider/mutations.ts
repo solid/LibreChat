@@ -17,6 +17,8 @@ import {
 import useUpdateTagsInConvo from '~/hooks/Conversations/useUpdateTagsInConvo';
 import { updateConversationTag } from '~/utils/conversationTags';
 import { useConversationTagsQuery } from './queries';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
+import { useAuthContext } from '~/hooks';
 
 export type TGenTitleMutation = UseMutationResult<
   t.TGenTitleResponse,
@@ -27,6 +29,8 @@ export type TGenTitleMutation = UseMutationResult<
 
 export const useGenTitleMutation = (): TGenTitleMutation => {
   const queryClient = useQueryClient();
+  const { isSolidUser, saveConversation } = useSolidStorage();
+  
   return useMutation((payload: t.TGenTitleRequest) => dataService.genTitle(payload), {
     onSuccess: (response, vars) => {
       queryClient.setQueryData(
@@ -39,6 +43,45 @@ export const useGenTitleMutation = (): TGenTitleMutation => {
         title: response.title,
       }));
       document.title = response.title;
+      
+      // Update title in Solid Pod for Solid users
+      if (isSolidUser && vars.conversationId) { 
+        // Get the full conversation from cache and save with new title
+        const cachedConvo = queryClient.getQueryData<t.TConversation>([
+          QueryKeys.conversation,
+          vars.conversationId,
+        ]);
+        
+        if (cachedConvo) {
+          // Get messages from cache
+          const cachedMessages = queryClient.getQueryData<t.TMessage[]>([
+            QueryKeys.messages,
+            vars.conversationId,
+          ]);
+          
+          // saveConversation expects full TMessage[] in messages field (it casts internally)
+          // even though TConversation type says messages: string[]
+          const updatedConvo = {
+            ...cachedConvo,
+            title: response.title,
+            messages: cachedMessages || [], // Full messages for Pod storage
+          } as unknown as t.TConversation; // Cast to satisfy type checker
+          
+          saveConversation(updatedConvo).then((result) => {
+            if (result.isError) {
+              logger.error('Solid Storage', 'Failed to update title in Pod', {
+                error: result.message,
+                conversationId: vars.conversationId,
+              });
+            } else {
+              logger.log('Solid Storage', 'Title updated in Pod', {
+                conversationId: vars.conversationId,
+                title: response.title,
+              });
+            }
+          });
+        }
+      }
     },
   });
 };
@@ -52,8 +95,57 @@ export const useUpdateConversationMutation = (
   unknown
 > => {
   const queryClient = useQueryClient();
+  const { user } = useAuthContext();
+  const { isSolidUser, saveConversation } = useSolidStorage();
+  
   return useMutation(
-    (payload: t.TUpdateConversationRequest) => dataService.updateConversation(payload),
+    async (payload: t.TUpdateConversationRequest) => {
+      logger.log('Solid Storage', '🔄 updateConversationMutation called', {
+        conversationId: payload.conversationId,
+        isSolidUser,
+        updates: Object.keys(payload),
+      });
+
+      // If Solid user, save to Pod instead of API
+      if (isSolidUser && payload.conversationId) {
+
+        // Get current conversation from cache
+        const currentConvo = queryClient.getQueryData<t.TConversation>([
+          QueryKeys.conversation,
+          payload.conversationId,
+        ]);
+        
+        if (currentConvo) {
+          // Merge updates with current conversation
+          const updatedConvo: t.TConversation = {
+            ...currentConvo,
+            ...payload,
+          } as t.TConversation;
+          
+          logger.debug('Solid Storage', 'Merged conversation data', {
+            conversationId: updatedConvo.conversationId,
+            title: updatedConvo.title,
+          });
+          
+          // Save to Pod
+          const result = await saveConversation(updatedConvo);
+          if (result.isError) {
+            logger.error('Solid Storage', 'Failed to update conversation in Pod', {
+              error: result.message,
+              conversationId: payload.conversationId,
+            });
+            throw new Error(result.message || 'Failed to save conversation to Pod');
+          }
+          
+          // Return in same format as API response
+          return updatedConvo as t.TUpdateConversationResponse;
+        }
+        throw new Error('Conversation not found');
+      }
+      
+      // Regular users: use API (existing flow)
+      return dataService.updateConversation(payload);
+    },
     {
       onSuccess: (updatedConvo, payload) => {
         const targetId = payload.conversationId || id;
@@ -486,10 +578,52 @@ export const useDeleteConversationMutation = (
   unknown
 > => {
   const queryClient = useQueryClient();
+  const { user } = useAuthContext();
+  const { isSolidUser, deleteConversation } = useSolidStorage();
 
   return useMutation(
-    (payload: t.TDeleteConversationRequest) =>
-      dataService.deleteConversation(payload) as Promise<t.TDeleteConversationResponse>,
+    async (payload: t.TDeleteConversationRequest) => {
+      logger.log('Solid Storage', '🔄 deleteConversationMutation called', {
+        conversationId: payload.conversationId,
+        isSolidUser,
+      });
+
+      // If Solid user, delete from Pod instead of API
+      if (isSolidUser && payload.conversationId) {
+
+        // Get conversation to get title for file name
+        const currentConvo = queryClient.getQueryData<t.TConversation>([
+          QueryKeys.conversation,
+          payload.conversationId,
+        ]);
+        
+        const result = await deleteConversation(
+          payload.conversationId,
+          currentConvo?.title || undefined,
+        );
+        
+        if (result.isError) {
+          logger.error('Solid Storage', 'Failed to delete conversation from Pod', {
+            error: result.message,
+            conversationId: payload.conversationId,
+          });
+          throw new Error(result.message || 'Failed to delete conversation from Pod');
+        }
+        
+        // Return in same format as API response
+        return {
+          acknowledged: true,
+          deletedCount: 1,
+          messages: {
+            acknowledged: true,
+            deletedCount: 0, // Messages are deleted with the conversation file
+          },
+        } as t.TDeleteConversationResponse;
+      }
+      
+      // Regular users: use API (existing flow)
+      return dataService.deleteConversation(payload) as Promise<t.TDeleteConversationResponse>;
+    },
     {
       onMutate: async () => {
         await queryClient.cancelQueries([QueryKeys.allConversations]);

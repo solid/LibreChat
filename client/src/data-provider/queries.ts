@@ -31,7 +31,8 @@ import type {
   SharedLinksResponse,
 } from 'librechat-data-provider';
 import type { ConversationCursorData } from '~/utils/convos';
-import { findConversationInInfinite } from '~/utils';
+import { findConversationInInfinite, logger } from '~/utils';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
 
 export const useGetPresetsQuery = (
   config?: UseQueryOptions<TPreset[]>,
@@ -50,11 +51,18 @@ export const useGetConvoIdQuery = (
   config?: UseQueryOptions<t.TConversation>,
 ): QueryObserverResult<t.TConversation> => {
   const queryClient = useQueryClient();
+  const { isSolidUser, loadConversations, isSessionReady } = useSolidStorage();
+
+  // For Solid users: only need isSessionReady (they bypass normal auth)
+  // For non-Solid users: respect the caller's enabled condition
+  const callerEnabled = config?.enabled ?? true;
+  const effectiveEnabled = isSessionReady && !!id && (isSolidUser || callerEnabled);
 
   return useQuery<t.TConversation>(
-    [QueryKeys.conversation, id],
-    () => {
-      // Try to find in all fetched infinite pages
+    // Include isSolidUser in key so query refetches when session is restored
+    [QueryKeys.conversation, id, { isSolidUser }],
+    async () => {
+      // Try to find in all fetched infinite pages first
       const convosQuery = queryClient.getQueryData<InfiniteData<ConversationCursorData>>(
         [QueryKeys.allConversations],
         { exact: false },
@@ -64,7 +72,33 @@ export const useGetConvoIdQuery = (
       if (found && found.messages != null) {
         return found;
       }
-      // Otherwise, fetch from API
+      
+      // For Solid users, load from Pod
+      if (isSolidUser) {
+        const conversations = await loadConversations();
+        const solidConvo = conversations.find(c => c.conversationId === id);
+        if (solidConvo) {
+          // If the conversation has full messages attached, store them in the messages cache
+          const fullMessages = (solidConvo as any)._fullMessages as t.TMessage[] | undefined;
+          if (fullMessages && fullMessages.length > 0) {
+            queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
+            // Remove the temporary _fullMessages property
+            delete (solidConvo as any)._fullMessages;
+          }
+          
+          return solidConvo;
+        }
+
+        return {
+          conversationId: id,
+          title: 'New Chat',
+          endpoint: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as t.TConversation;
+      }
+      
+      // Otherwise, fetch from API (non-Solid users)
       return dataService.getConversationById(id);
     },
     {
@@ -72,6 +106,8 @@ export const useGetConvoIdQuery = (
       refetchOnReconnect: false,
       refetchOnMount: false,
       ...config,
+      // Override enabled with our merged condition
+      enabled: effectiveEnabled,
     },
   );
 };
@@ -81,26 +117,91 @@ export const useConversationsInfiniteQuery = (
   config?: UseInfiniteQueryOptions<ConversationListResponse, unknown>,
 ) => {
   const { isArchived, sortBy, sortDirection, tags, search } = params;
+  const { isSolidUser, isSessionReady, loadConversations } = useSolidStorage();
+  const queryClient = useQueryClient();
+
+  // For Solid users: only need isSessionReady (they bypass normal auth)
+  // For non-Solid users: respect the caller's enabled condition
+  const callerEnabled = config?.enabled ?? true;
+  const effectiveEnabled = isSessionReady && (isSolidUser || callerEnabled);
 
   return useInfiniteQuery<ConversationListResponse>({
     queryKey: [
       isArchived ? QueryKeys.archivedConversations : QueryKeys.allConversations,
-      { isArchived, sortBy, sortDirection, tags, search },
+      // Include isSolidUser so query refetches when session is restored
+      { isArchived, sortBy, sortDirection, tags, search, isSolidUser },
     ],
-    queryFn: ({ pageParam }) =>
-      dataService.listConversations({
+    queryFn: async ({ pageParam }) => {
+      // If Solid user, load from Pod instead of API
+      if (isSolidUser) {
+        
+        const conversations = await loadConversations();
+        
+        // Apply filters (tags, search, archived)
+        let filtered = conversations;
+        
+        if (tags && tags.length > 0) {
+          filtered = filtered.filter(conv => 
+            conv.tags && conv.tags.some(tag => tags.includes(tag))
+          );
+        }
+        
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filtered = filtered.filter(conv =>
+            conv.title?.toLowerCase().includes(searchLower) ||
+            conv.conversationId?.toLowerCase().includes(searchLower)
+          );
+        }
+        
+        if (isArchived !== undefined) {
+          filtered = filtered.filter(conv => 
+            isArchived ? conv.isArchived === true : conv.isArchived !== true
+          );
+        }
+        
+        // Sort conversations
+        filtered.sort((a, b) => {
+          const aDate = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bDate = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return sortDirection === 'asc' ? aDate - bDate : bDate - aDate;
+        });
+        
+        // Store full messages in the messages cache for each conversation
+        // This ensures messages are available when needed
+        for (const convo of filtered) {
+          const fullMessages = (convo as any)._fullMessages as t.TMessage[] | undefined;
+          if (fullMessages && fullMessages.length > 0 && convo.conversationId) {
+            queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, convo.conversationId], fullMessages);
+            // Remove the temporary _fullMessages property
+            delete (convo as any)._fullMessages;
+          }
+        }
+        
+        // For infinite query, return as single page (no pagination for Pod)
+        return {
+          conversations: filtered,
+          nextCursor: null, // Pod doesn't support cursor-based pagination
+        } as ConversationListResponse;
+      }
+      
+      // Regular users: load from API (existing flow)
+      return dataService.listConversations({
         isArchived,
         sortBy,
         sortDirection,
         tags,
         search,
         cursor: pageParam?.toString(),
-      }),
+      });
+    },
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
     keepPreviousData: true,
     staleTime: 5 * 60 * 1000, // 5 minutes
     cacheTime: 30 * 60 * 1000, // 30 minutes
     ...config,
+    // Override enabled with our merged condition
+    enabled: effectiveEnabled,
   });
 };
 

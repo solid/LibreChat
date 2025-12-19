@@ -54,6 +54,24 @@ function SocialLoginRender({
     setIsLoading(true);
     setError(null);
 
+    // Clear Solid auth flag to ensure a clean login
+    sessionStorage.removeItem('solid_auth_in_progress');
+    
+    // Clear ALL localStorage keys from previous Solid sessions
+    // This ensures @ldo/solid-react starts fresh
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (
+        key.startsWith('solidClientAuthn') || 
+        key.startsWith('solidClientAuthenticationUser') || 
+        key.startsWith('oidc.')
+      )) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+
     try {
       const redirectUrl = `${window.location.origin}/c/new`;
       await login(issuer, { redirectUrl });
