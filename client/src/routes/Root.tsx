@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
+import { useRecoilValue } from 'recoil';
 import type { ContextType } from '~/common';
 import {
   useSearchEnabled,
@@ -21,6 +22,7 @@ import { Nav, MobileNav } from '~/components/Nav';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
 import { Spinner } from '@librechat/client';
+import store from '~/store';
 
 export default function Root() {
   const [showTerms, setShowTerms] = useState(false);
@@ -31,20 +33,25 @@ export default function Root() {
   });
 
   const { isAuthenticated, logout } = useAuthContext();
+  const recoilUser = useRecoilValue(store.user);
+  
+  // Consider user authenticated if either AuthContext says so OR Recoil has user
+  // (Recoil is set immediately, AuthContext is debounced)
+  const effectivelyAuthenticated = isAuthenticated || !!recoilUser;
 
   // Global health check - runs once per authenticated session
-  useHealthCheck(isAuthenticated);
+  useHealthCheck(effectivelyAuthenticated);
 
-  const assistantsMap = useAssistantsMap({ isAuthenticated });
-  const agentsMap = useAgentsMap({ isAuthenticated });
-  const fileMap = useFileMap({ isAuthenticated });
+  const assistantsMap = useAssistantsMap({ isAuthenticated: effectivelyAuthenticated });
+  const agentsMap = useAgentsMap({ isAuthenticated: effectivelyAuthenticated });
+  const fileMap = useFileMap({ isAuthenticated: effectivelyAuthenticated });
 
   const { data: config } = useGetStartupConfig();
   const { data: termsData } = useUserTermsQuery({
-    enabled: isAuthenticated && config?.interface?.termsOfService?.modalAcceptance === true,
+    enabled: effectivelyAuthenticated && config?.interface?.termsOfService?.modalAcceptance === true,
   });
 
-  useSearchEnabled(isAuthenticated);
+  useSearchEnabled(effectivelyAuthenticated);
 
   useEffect(() => {
     if (termsData) {
@@ -78,7 +85,7 @@ export default function Root() {
   
   // If auth is in progress, render a loading state instead of null
   // This prevents React Router from thinking the route doesn't match
-  if (!isAuthenticated && hasSolidCallback) {
+  if (!effectivelyAuthenticated && hasSolidCallback) {
     return (
       <div className="flex h-screen items-center justify-center" aria-live="polite" role="status">
         <div className="flex flex-col items-center gap-4">
@@ -91,7 +98,7 @@ export default function Root() {
     );
   }
   
-  if (!isAuthenticated && !hasSolidCallback) {
+  if (!effectivelyAuthenticated && !hasSolidCallback) {
     return null;
   }
 

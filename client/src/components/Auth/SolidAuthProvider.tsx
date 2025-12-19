@@ -6,28 +6,26 @@ import { useSetRecoilState, useRecoilValue } from 'recoil';
 import { Spinner } from '@librechat/client';
 import store from '~/store';
 
+const SOLID_AUTH_IN_PROGRESS_KEY = 'solid_auth_in_progress';
+
 /**
  * Solid Authentication Provider Component
- * 
+ *
  * Handles Solid OIDC authentication flow:
  * 1. User selects provider and logs in via @ldo/solid-react
  * 2. Once session is logged in, call backend to authenticate
  * 3. Backend sets cookies (refreshToken, token_provider)
  * 4. Redirect to chat page
- * 
+ *
  */
 function SolidAuthInner({ children }: { children: ReactNode }) {
   const { session } = useSolidAuth();
   const setUser = useSetRecoilState(store.user);
   const currentUser = useRecoilValue(store.user);
   const hasCalledBackend = useRef(false);
-  const hasRedirected = useRef(false);
-  const isRedirecting = useRef(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  const SOLID_AUTH_REDIRECTED_KEY = 'solid_auth_redirected';
-  const SOLID_AUTH_IN_PROGRESS_KEY = 'solid_auth_in_progress'; 
-  
+  // Set auth in progress flag if we have callback params (for AuthContext to know)
   if (typeof window !== 'undefined') {
     const urlParams = new URLSearchParams(window.location.search);
     const hasCallbackParams = urlParams.has('code') && urlParams.has('state');
@@ -35,14 +33,15 @@ function SolidAuthInner({ children }: { children: ReactNode }) {
       sessionStorage.setItem(SOLID_AUTH_IN_PROGRESS_KEY, 'true');
     }
   }
-  
+
   // Initialize refs from sessionStorage on mount
   useEffect(() => {
-    const wasRedirected = sessionStorage.getItem(SOLID_AUTH_REDIRECTED_KEY) === 'true';
-    if (wasRedirected) {
-      hasRedirected.current = true;
+    // Clear the in-progress flag once user is confirmed logged in
+    // This ensures Root.tsx shows loading state until AuthContext.isAuthenticated is true
+    if (currentUser && sessionStorage.getItem(SOLID_AUTH_IN_PROGRESS_KEY)) {
+      sessionStorage.removeItem(SOLID_AUTH_IN_PROGRESS_KEY);
     }
-  }, []);
+  }, [session.isLoggedIn, session.webId, currentUser]);
 
   const solidAuthMutation = useSolidAuthMutation({
     onMutate: () => {
@@ -50,156 +49,69 @@ function SolidAuthInner({ children }: { children: ReactNode }) {
     },
     onSuccess: (data) => {
       const { user, token } = data;
-      
+
       if (!token) {
         setIsAuthenticating(false);
         hasCalledBackend.current = false;
         return;
       }
-      
+
       // Set user in Recoil state
       setUser(user);
-      
+
       // Set token header for API requests
       setTokenHeader(token);
-      
-      // Clean URL params (like Google OAuth does)
+
+      // Dispatch tokenRefreshed event so AuthContext sets isAuthenticated = true
+      // This is the same event that silentRefresh uses
+      window.dispatchEvent(new CustomEvent('tokenRefreshed', { detail: token }));
+
+      setIsAuthenticating(false);
+
+      // Clean URL params
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.has('code') || urlParams.has('state') || urlParams.has('iss')) {
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, '', cleanUrl);
+        window.history.replaceState({}, '', window.location.pathname);
       }
-      
-      setIsAuthenticating(false);
-      
-      //  Mark as redirected BEFORE redirecting to prevent loops
-      if (hasRedirected.current) {
-        return;
-      }
-      
-      hasRedirected.current = true;
-      hasCalledBackend.current = true;
 
-      sessionStorage.setItem(SOLID_AUTH_REDIRECTED_KEY, 'true');
-      // Clear the "in progress" flag since auth is complete
-      sessionStorage.removeItem(SOLID_AUTH_IN_PROGRESS_KEY);
-      
-      // Clean up @ldo/solid-react's localStorage to prevent it from re-processing
-      try {
-        const keysToRemove: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('oidc.') || key.startsWith('solidClientAuthn') || key.startsWith('solidClientAuthenticationUser'))) {
-            keysToRemove.push(key);
-          }
-        }
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-      } catch (err) {
-        // Silently fail if localStorage cleanup fails
-      }
-      
-      // Prevent multiple redirects
-      if (isRedirecting.current) {
-        return;
-      }
-      
-      isRedirecting.current = true;
-      
-      // If we're already on /c/new, just clean the URL params and stay there
-      // Otherwise, redirect to /c/new
-      if (window.location.pathname.includes('/c/')) {
-        if (!window.location.pathname.includes('/c/new')) {
-          window.location.replace('/c/new');
-        }
-      } else {
-        window.location.replace('/c/new');
+      // If not on a chat page, navigate there
+      if (!window.location.pathname.includes('/c/')) {
+        window.location.href = '/c/new';
       }
     },
     onError: (error) => {
       setIsAuthenticating(false);
-      hasCalledBackend.current = false;
-      // Clear the "in progress" flag on error so user can try again
       sessionStorage.removeItem(SOLID_AUTH_IN_PROGRESS_KEY);
     },
   });
 
-  // Handle Solid authentication 
+  // Handle Solid authentication
   useEffect(() => {
-    // This flag tells AuthContext that auth is in progress, even after URL params are cleaned
-    const initialUrlParams = new URLSearchParams(window.location.search);
-    const initialHasCallbackParams = initialUrlParams.has('code') || initialUrlParams.has('state');
-    
-    if (initialHasCallbackParams && !sessionStorage.getItem(SOLID_AUTH_IN_PROGRESS_KEY)) {
-      sessionStorage.setItem(SOLID_AUTH_IN_PROGRESS_KEY, 'true');
-    }
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasCallbackParams = urlParams.has('code') || urlParams.has('state');
 
-    // Check sessionStorage on every render (in case it was set by another instance)
-    const wasRedirectedInStorage = sessionStorage.getItem(SOLID_AUTH_REDIRECTED_KEY) === 'true';
-    if (wasRedirectedInStorage && !hasRedirected.current) {
-      hasRedirected.current = true;
-    }
-
-    //  Don't process if we've already redirected or if user is already authenticated
-    if (hasRedirected.current || wasRedirectedInStorage || currentUser) {
-      // Clean callback params immediately to prevent @ldo/solid-react from re-processing
-      if (initialHasCallbackParams) {
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, '', cleanUrl);
-      }
-      
+    // If user is already logged in to the app, nothing to do
+    if (currentUser) {
       return;
     }
 
-    const isOnLoginPage = window.location.pathname.includes('/login');
-    const isOnChatPage = window.location.pathname.includes('/c/');
-    
-    if (!isOnLoginPage && !isOnChatPage) {
+    // If we've already called the backend in this session, don't call again
+    if (hasCalledBackend.current || solidAuthMutation.isLoading) {
       return;
     }
 
-    // Check if we have auth cookies (means backend already authenticated us)
-    const hasAuthCookie = document.cookie.split(';').some(cookie => cookie.trim().startsWith('refreshToken='));
-    if (hasAuthCookie && !currentUser && !isRedirecting.current) {
-      // Backend authenticated but user state not set yet - redirect to chat
-      hasRedirected.current = true;
-      isRedirecting.current = true;
-      sessionStorage.setItem(SOLID_AUTH_REDIRECTED_KEY, 'true');
-      setTimeout(() => {
-        window.location.replace('/c/new');
-      }, 0);
-      return;
-    }
-
-    // Once session is logged in, call backend
-    // Note: @ldo/solid-react may remove callback params before session.isLoggedIn becomes true
-    // So we check session.isLoggedIn first, not the callback params
-    if (session.isLoggedIn && session.webId) {
-      // Prevent duplicate calls
-      if (hasCalledBackend.current || solidAuthMutation.isLoading) {
-        return;
-      }
-
+    // Wait for @ldo/solid-react to finish processing
+    // Call backend when: Solid session is logged in AND URL params are gone
+    if (session.isLoggedIn && session.webId && !hasCallbackParams) {
       hasCalledBackend.current = true;
       solidAuthMutation.mutate({ webId: session.webId });
     }
-  }, [session.isLoggedIn, session.webId, currentUser, solidAuthMutation.isLoading]);
+  }, [session.isLoggedIn, session.webId, currentUser]);
 
-  // Show loading overlay during authentication
-  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const hasCallbackParams = urlParams && (urlParams.has('code') || urlParams.has('state'));
-  const isOnLoginPage = typeof window !== 'undefined' && window.location.pathname.includes('/login');
-  
-  // Show loading if we have callback params and are either:
-  // 1. Currently authenticating (mutation in progress)
-  // 2. Session is logged in (waiting for backend to authenticate)
-  // 3. On login page with callback params (app redirected us here during auth)
-  const showLoading = hasCallbackParams && (
-    isAuthenticating || 
-    solidAuthMutation.isLoading || 
-    session.isLoggedIn || 
-    (isOnLoginPage && !currentUser)
-  );
-  
+  // Show loading overlay during Solid authentication
+  // Show when: we're authenticating OR mutation is loading, AND user isn't logged in yet
+  const showLoading = !currentUser && (isAuthenticating || solidAuthMutation.isLoading);
+
   return (
     <>
       {showLoading && (

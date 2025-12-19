@@ -92,6 +92,30 @@ module.exports = {
         logger.debug(`[saveConvo] ${metadata.context}`);
       }
 
+      // Check if user is Solid-authenticated
+      // Solid users store conversations in their Pod, not MongoDB
+      const isSolidUser = req.user?.provider === 'solid';
+      
+      if (isSolidUser) {
+        logger.info('[saveConvo] Solid user detected - skipping MongoDB save', {
+          userId: req.user.id,
+          conversationId: conversationId || newConversationId,
+          provider: req.user.provider,
+          message: 'Conversation will be stored in user\'s Solid Pod instead',
+        });
+        // Return a minimal response indicating success but not saved to MongoDB
+        return {
+          conversationId: conversationId || newConversationId,
+          message: 'Conversation saved to Solid Pod (not MongoDB)',
+        };
+      } else {
+        logger.debug('[saveConvo] Regular user - saving to MongoDB', {
+          userId: req.user.id,
+          conversationId: conversationId || newConversationId,
+          provider: req.user?.provider || 'local',
+        });
+      }
+
       const messages = await getMessages({ conversationId }, '_id');
       const update = { ...convo, messages, user: req.user.id };
 

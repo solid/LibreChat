@@ -39,6 +39,7 @@ import useContentHandler from '~/hooks/SSE/useContentHandler';
 import useStepHandler from '~/hooks/SSE/useStepHandler';
 import { useApplyAgentTemplate } from '~/hooks/Agents';
 import { useAuthContext } from '~/hooks/AuthContext';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 import { useLiveAnnouncer } from '~/Providers';
 import store from '~/store';
@@ -184,6 +185,8 @@ export default function useEventHandlers({
   const setAbortScroll = useSetRecoilState(store.abortScroll);
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuthContext();
+  const { isSolidUser, saveConversation } = useSolidStorage();
 
   const lastAnnouncementTimeRef = useRef(Date.now());
   const { conversationId: paramId } = useParams();
@@ -558,25 +561,100 @@ export default function useEventHandlers({
 
         if (setConversation && isAddedRequest !== true) {
           setConversation((prevState) => {
-            const update = {
-              ...prevState,
-              ...(conversation as TConversation),
-            };
-            if (prevState?.model != null && prevState.model !== submissionConvo.model) {
-              update.model = prevState.model;
-            }
+            // Check cache first for the latest title (might have been generated asynchronously)
             const cachedConvo = queryClient.getQueryData<TConversation>([
               QueryKeys.conversation,
               conversation.conversationId,
             ]);
-            if (!cachedConvo) {
-              queryClient.setQueryData(
-                [QueryKeys.conversation, conversation.conversationId],
-                update,
-              );
+            
+            // Prefer title from cache (if it's a real title), then prevState, then conversation
+          
+            const bestTitle: string | null = 
+              (cachedConvo?.title && cachedConvo.title !== 'Untitled' && cachedConvo.title !== 'New Chat') 
+                ? cachedConvo.title
+                : (prevState?.title && prevState.title !== 'Untitled' && prevState.title !== 'New Chat')
+                  ? prevState.title
+                  : (conversation.title ?? null); // Default to null if undefined
+            
+            const update: TConversation = {
+              ...(prevState || {}),
+              ...(conversation as TConversation),
+              title: bestTitle,
+            } as TConversation;
+            
+            if (prevState?.model != null && prevState.model !== submissionConvo.model) {
+              update.model = prevState.model;
             }
+            
+            // Always update cache with latest state (including preserved title)
+            queryClient.setQueryData(
+              [QueryKeys.conversation, conversation.conversationId],
+              update,
+            );
+            
             return update;
           });
+
+          // Save conversation to Solid Pod if user is Solid-authenticated
+          if (isSolidUser && conversation.conversationId && conversation.conversationId !== Constants.NEW_CONVO) {
+            // Use setTimeout to ensure the cache update from setConversation and setFinalMessages has propagated
+            // This ensures we get the latest title and all messages from the cache
+            setTimeout(() => {
+              const cachedConvo = queryClient.getQueryData<TConversation>([
+                QueryKeys.conversation,
+                conversation.conversationId,
+              ]);
+              
+              const allCachedMessages = queryClient.getQueryData<TMessage[]>([
+                QueryKeys.messages,
+                conversation.conversationId,
+              ]);
+              
+              // Use cached conversation if available (has latest title), otherwise fall back to backend response
+              const conversationToSave = cachedConvo || conversation;
+              
+              // Use all cached messages if available, otherwise fall back to finalMessages
+              const messagesToSave = allCachedMessages && allCachedMessages.length > 0 
+                ? allCachedMessages 
+                : finalMessages;
+
+              // Get the final conversation object with all messages
+              // Store full message content for Solid Pod (no backend dependency)
+              const finalConversation = {
+                ...conversationToSave,
+                messages: messagesToSave, // Store ALL messages for Pod
+              } as unknown as TConversation;
+
+              // Save to Solid Pod (async, don't await to avoid blocking UI)
+              saveConversation(finalConversation).then((result) => {
+                if (result.isError) {
+                  logger.error('Solid Storage', 'Failed to save conversation to Pod', {
+                    error: result.message,
+                    conversationId: conversation.conversationId,
+                  });
+                } else {
+                  logger.log('Solid Storage', 'Conversation saved to Pod successfully', {
+                    conversationId: conversation.conversationId,
+                    title: finalConversation.title,
+                    messageCount: messagesToSave.length,
+                  });
+                }
+              }).catch((err) => {
+                logger.error('Solid Storage', 'Error saving conversation to Pod', {
+                  error: err,
+                  conversationId: conversation.conversationId,
+                });
+              });
+            }, 0);
+          } else {
+            if (!isSolidUser) {
+              logger.debug('Solid Storage', 'Skipping Pod save - user is not Solid-authenticated');
+            } else if (!conversation.conversationId || conversation.conversationId === Constants.NEW_CONVO) {
+              logger.debug('Solid Storage', 'Skipping Pod save - new conversation not yet created', {
+                conversationId: conversation.conversationId,
+              });
+            }
+          }
 
           if (conversation.conversationId && submission.ephemeralAgent) {
             applyAgentTemplate({
@@ -612,6 +690,8 @@ export default function useEventHandlers({
       location.pathname,
       applyAgentTemplate,
       attachmentHandler,
+      isSolidUser,
+      saveConversation,
     ],
   );
 

@@ -6,6 +6,7 @@ import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import type { TPreset } from 'librechat-data-provider';
 import { useGetConvoIdQuery, useGetStartupConfig, useGetEndpointsQuery } from '~/data-provider';
 import { useNewConvo, useAppStartup, useAssistantListMap, useIdChangeEffect } from '~/hooks';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
 import { getDefaultModelSpec, getModelSpecPreset, logger } from '~/utils';
 import { ToolCallsMapProvider } from '~/Providers';
 import ChatView from '~/components/Chat/ChatView';
@@ -18,6 +19,7 @@ export default function ChatRoute() {
   const { data: startupConfig } = useGetStartupConfig();
   const { isAuthenticated, user } = useAuthRedirect();
   const [searchParams] = useSearchParams();
+  const { isSolidUser } = useSolidStorage();
   
   // Check if we have Solid OIDC callback params or auth in progress
   const checkSolidAuth = () => {
@@ -32,6 +34,10 @@ export default function ChatRoute() {
   };
   
   const hasSolidCallback = checkSolidAuth();
+  
+  // For Solid users, we can proceed even if isAuthenticated is false
+  // (the Solid session is our source of truth)
+  const effectivelyAuthenticated = isAuthenticated || isSolidUser;
 
   const setIsTemporary = useRecoilCallback(
     ({ set }) =>
@@ -49,14 +55,14 @@ export default function ChatRoute() {
   const { newConversation } = useNewConvo();
 
   const modelsQuery = useGetModelsQuery({
-    enabled: isAuthenticated,
+    enabled: effectivelyAuthenticated,
     refetchOnMount: 'always',
   });
   const initialConvoQuery = useGetConvoIdQuery(conversationId, {
     enabled:
-      isAuthenticated && conversationId !== Constants.NEW_CONVO && !hasSetConversation.current,
+      effectivelyAuthenticated && conversationId !== Constants.NEW_CONVO && !hasSetConversation.current,
   });
-  const endpointsQuery = useGetEndpointsQuery({ enabled: isAuthenticated });
+  const endpointsQuery = useGetEndpointsQuery({ enabled: effectivelyAuthenticated });
   const assistantListMap = useAssistantListMap();
 
   const isTemporaryChat = conversation && conversation.expiredAt ? true : false;
@@ -146,8 +152,8 @@ export default function ChatRoute() {
     );
   }
 
-  // Allow rendering if we have Solid callback params (authentication in progress)
-  if (!isAuthenticated && !hasSolidCallback) {
+  // Allow rendering if we have Solid callback params (authentication in progress) or if Solid user
+  if (!effectivelyAuthenticated && !hasSolidCallback) {
     return null;
   }
 
