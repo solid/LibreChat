@@ -584,7 +584,7 @@ export function useSolidStorage() {
         }
 
         // Find the conversation file
-        const fileName = `${sanitizeFileName(title || conversationId)}.json`;
+        const fileName = `${conversationId}.json`;
         const fileResource = container.child(fileName);
 
         // Delete the file
@@ -626,6 +626,7 @@ export function useSolidStorage() {
           // Order file might not exist, that's okay
           logger.debug('Solid Storage', 'Order file not found or invalid during delete', {
             error: e,
+            conversationId,
           });
         }
 
