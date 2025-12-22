@@ -15,6 +15,7 @@ import {
   updateConvoInAllQueries,
   removeConvoFromAllQueries,
 } from '~/utils';
+import type { ConversationCursorData } from '~/utils/convos';
 import useUpdateTagsInConvo from '~/hooks/Conversations/useUpdateTagsInConvo';
 import { updateConversationTag } from '~/utils/conversationTags';
 import { useConversationTagsQuery } from './queries';
@@ -97,7 +98,7 @@ export const useUpdateConversationMutation = (
 > => {
   const queryClient = useQueryClient();
   const { user } = useAuthContext();
-  const { isSolidUser, saveConversation } = useSolidStorage();
+  const { isSolidUser, saveConversation, loadConversations } = useSolidStorage();
   
   return useMutation(
     async (payload: t.TUpdateConversationRequest) => {
@@ -109,27 +110,70 @@ export const useUpdateConversationMutation = (
 
       // If Solid user, save to Pod instead of API
       if (isSolidUser && payload.conversationId) {
-
-        // Get current conversation from cache
-        const currentConvo = queryClient.getQueryData<t.TConversation>([
+        // Try to get current conversation from cache (with Solid user key)
+        let currentConvo = queryClient.getQueryData<t.TConversation>([
           QueryKeys.conversation,
           payload.conversationId,
+          { isSolidUser },
         ]);
         
+        // If not found, try without the isSolidUser key (for backwards compatibility)
+        if (!currentConvo) {
+          currentConvo = queryClient.getQueryData<t.TConversation>([
+            QueryKeys.conversation,
+            payload.conversationId,
+          ]);
+        }
+        
+        // If still not found, try to find in infinite query cache
+        if (!currentConvo) {
+          const convosQuery = queryClient.getQueryData<InfiniteData<ConversationCursorData>>(
+            [QueryKeys.allConversations],
+            { exact: false },
+          );
+          if (convosQuery) {
+            const found = convosQuery.pages
+              .flatMap(page => page.conversations || [])
+              .find(c => c.conversationId === payload.conversationId);
+            if (found) {
+              currentConvo = found;
+            }
+          }
+        }
+        
+        // If still not found, load from Pod
+        if (!currentConvo) {
+          const conversations = await loadConversations();
+          currentConvo = conversations.find(c => c.conversationId === payload.conversationId);
+        }
+        
         if (currentConvo) {
+          // Get messages from cache (needed for Pod storage)
+          let cachedMessages = queryClient.getQueryData<t.TMessage[]>([
+            QueryKeys.messages,
+            payload.conversationId,
+          ]);
+          
+          // If messages not in cache, try to get from conversation's _fullMessages
+          if (!cachedMessages || cachedMessages.length === 0) {
+            if ((currentConvo as any)?._fullMessages) {
+              cachedMessages = (currentConvo as any)._fullMessages as t.TMessage[];
+            }
+          }
+          
           // Merge updates with current conversation
           const updatedConvo: t.TConversation = {
             ...currentConvo,
             ...payload,
           } as t.TConversation;
           
-          logger.debug('Solid Storage', 'Merged conversation data', {
-            conversationId: updatedConvo.conversationId,
-            title: updatedConvo.title,
-          });
+         
+          const convoToSave = {
+            ...updatedConvo,
+            messages: cachedMessages || [], // Full messages for Pod storage
+          } as unknown as t.TConversation; // Cast to satisfy type checker
           
-          // Save to Pod
-          const result = await saveConversation(updatedConvo);
+          const result = await saveConversation(convoToSave);
           if (result.isError) {
             logger.error('Solid Storage', 'Failed to update conversation in Pod', {
               error: result.message,
