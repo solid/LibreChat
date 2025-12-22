@@ -568,13 +568,19 @@ export default function useEventHandlers({
             ]);
             
             // Prefer title from cache (if it's a real title), then prevState, then conversation
-          
+            // Never use "Untitled" or "New Chat" from backend - preserve existing title instead
+            const backendTitle = conversation.title && 
+              conversation.title !== 'Untitled' && 
+              conversation.title !== 'New Chat' 
+                ? conversation.title 
+                : null;
+            
             const bestTitle: string | null = 
               (cachedConvo?.title && cachedConvo.title !== 'Untitled' && cachedConvo.title !== 'New Chat') 
                 ? cachedConvo.title
                 : (prevState?.title && prevState.title !== 'Untitled' && prevState.title !== 'New Chat')
                   ? prevState.title
-                  : (conversation.title ?? null); // Default to null if undefined
+                  : backendTitle ?? prevState?.title ?? null; // Preserve prevState title if backend has invalid title
             
             const update: TConversation = {
               ...(prevState || {}),
@@ -613,6 +619,24 @@ export default function useEventHandlers({
               // Use cached conversation if available (has latest title), otherwise fall back to backend response
               const conversationToSave = cachedConvo || conversation;
               
+              // Ensure we never save "Untitled" or "New Chat" if we have a better title
+              // Check if we should preserve the existing title from Pod or cache
+              let titleToSave = conversationToSave.title;
+              if (!titleToSave || titleToSave === 'Untitled' || titleToSave === 'New Chat') {
+                // Try to get a better title from the previous state or cache
+                // This prevents overwriting a good title with "Untitled"
+                const betterTitle = cachedConvo?.title && 
+                  cachedConvo.title !== 'Untitled' && 
+                  cachedConvo.title !== 'New Chat'
+                    ? cachedConvo.title
+                    : null;
+                
+                // Only update if we found a better title, otherwise keep what we have
+                if (betterTitle) {
+                  titleToSave = betterTitle;
+                }
+              }
+              
               // Use all cached messages if available, otherwise fall back to finalMessages
               const messagesToSave = allCachedMessages && allCachedMessages.length > 0 
                 ? allCachedMessages 
@@ -622,7 +646,8 @@ export default function useEventHandlers({
               // Store full message content for Solid Pod (no backend dependency)
               const finalConversation = {
                 ...conversationToSave,
-                messages: messagesToSave, // Store ALL messages for Pod
+                title: titleToSave,
+                messages: messagesToSave,
               } as unknown as TConversation;
 
               // Save to Solid Pod (async, don't await to avoid blocking UI)
