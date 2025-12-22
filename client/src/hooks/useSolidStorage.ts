@@ -454,29 +454,54 @@ export function useSolidStorage() {
             
             // Convert stored messages back to TMessage format
             // Handle both StoredMessage format (from old saves) and TMessage format (from new saves)
-            const loadedMessages: TMessage[] = (conversationData.messages || []).map((msg: StoredMessage | TMessage) => {
-              // If it's already a TMessage (has all fields), use it directly
-              if ('content' in msg && 'sender' in msg) {
-                return msg as TMessage;
-              }
-              // Otherwise, convert from StoredMessage format
-              const storedMsg = msg as StoredMessage;
-              return {
-                messageId: storedMsg.messageId,
-                conversationId: storedMsg.conversationId,
-                parentMessageId: storedMsg.parentMessageId,
-                text: storedMsg.text,
-                sender: storedMsg.sender,
-                isCreatedByUser: storedMsg.isCreatedByUser,
-                model: storedMsg.model,
-                endpoint: storedMsg.endpoint,
-                createdAt: storedMsg.createdAt,
-                updatedAt: storedMsg.updatedAt,
-                content: storedMsg.content,
-                error: storedMsg.error,
-                finish_reason: storedMsg.finish_reason,
-              } as TMessage;
-            });
+           
+            const rawMessages = conversationData.messages || [];
+            
+            // Check if all messages are strings (message IDs) - this indicates an old format we can't load
+            if (rawMessages.length > 0 && rawMessages.every(msg => typeof msg === 'string')) {
+              logger.warn('Solid Storage', 'Conversation has messages as IDs (strings) - cannot load without full message objects', {
+                conversationId: conversationData.conversationId,
+                messageCount: rawMessages.length,
+              });
+             
+              continue;
+            }
+            
+            const loadedMessages: TMessage[] = rawMessages
+              .filter((msg) => {
+                // Skip if msg is a string (messageId) - we need full message objects
+                if (typeof msg === 'string') {
+                  logger.warn('Solid Storage', 'Skipping message ID (string) - full message object required', {
+                    messageId: msg,
+                    conversationId: conversationData.conversationId,
+                  });
+                  return false;
+                }
+                return true;
+              })
+              .map((msg: StoredMessage | TMessage) => {
+                // If it's already a TMessage (has all fields), use it directly
+                if (typeof msg === 'object' && msg !== null && 'content' in msg && 'sender' in msg) {
+                  return msg as TMessage;
+                }
+                // Otherwise, convert from StoredMessage format
+                const storedMsg = msg as StoredMessage;
+                return {
+                  messageId: storedMsg.messageId,
+                  conversationId: storedMsg.conversationId,
+                  parentMessageId: storedMsg.parentMessageId,
+                  text: storedMsg.text,
+                  sender: storedMsg.sender,
+                  isCreatedByUser: storedMsg.isCreatedByUser,
+                  model: storedMsg.model,
+                  endpoint: storedMsg.endpoint,
+                  createdAt: storedMsg.createdAt,
+                  updatedAt: storedMsg.updatedAt,
+                  content: storedMsg.content,
+                  error: storedMsg.error,
+                  finish_reason: storedMsg.finish_reason,
+                } as TMessage;
+              });
 
             // Convert back to TConversation format
             const conversation: TConversation = {
@@ -559,7 +584,7 @@ export function useSolidStorage() {
         }
 
         // Find the conversation file
-        const fileName = `${sanitizeFileName(title || conversationId)}.json`;
+        const fileName = `${conversationId}.json`;
         const fileResource = container.child(fileName);
 
         // Delete the file
@@ -601,6 +626,7 @@ export function useSolidStorage() {
           // Order file might not exist, that's okay
           logger.debug('Solid Storage', 'Order file not found or invalid during delete', {
             error: e,
+            conversationId,
           });
         }
 

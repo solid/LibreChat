@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { dataService, MutationKeys, QueryKeys, defaultOrderQuery } from 'librechat-data-provider';
 import type { InfiniteData, UseMutationResult } from '@tanstack/react-query';
 import type * as t from 'librechat-data-provider';
+import { v4 } from 'uuid';
 import {
   logger,
   /* Conversations */
@@ -690,7 +691,111 @@ export const useDuplicateConversationMutation = (
 ): UseMutationResult<t.TDuplicateConvoResponse, unknown, t.TDuplicateConvoRequest, unknown> => {
   const queryClient = useQueryClient();
   const { onSuccess, ..._options } = options ?? {};
-  return useMutation((payload) => dataService.duplicateConversation(payload), {
+  const { isSolidUser, loadConversations, saveConversation } = useSolidStorage();
+  
+  return useMutation(async (payload: t.TDuplicateConvoRequest) => {
+    // If Solid user, duplicate from Pod instead of API
+    if (isSolidUser && payload.conversationId) {
+
+      // Get full messages from cache first (most efficient)
+      let originalMessages = queryClient.getQueryData<t.TMessage[]>([
+        QueryKeys.messages,
+        payload.conversationId,
+      ]);
+
+      // If messages not in cache, load conversations from Pod
+      let originalConvo: t.TConversation | undefined;
+      if (!originalMessages || originalMessages.length === 0) {
+        const conversations = await loadConversations();
+        originalConvo = conversations.find(c => c.conversationId === payload.conversationId);
+        
+        if (!originalConvo) {
+          throw new Error('Conversation not found');
+        }
+
+        // Try to get messages from the conversation's _fullMessages
+        if ((originalConvo as any)?._fullMessages) {
+          originalMessages = (originalConvo as any)._fullMessages as t.TMessage[];
+        }
+      } else {
+        // Get conversation from cache
+        originalConvo = queryClient.getQueryData<t.TConversation>([
+          QueryKeys.conversation,
+          payload.conversationId,
+        ]);
+
+        // If conversation not in cache, load it
+        if (!originalConvo) {
+          const conversations = await loadConversations();
+          originalConvo = conversations.find(c => c.conversationId === payload.conversationId);
+        }
+      }
+
+      if (!originalConvo) {
+        throw new Error('Conversation not found');
+      }
+
+      if (!originalMessages || originalMessages.length === 0) {
+        throw new Error('Messages not found for conversation');
+      }
+
+      // Generate new conversationId
+      const newConversationId = v4();
+
+      // Create a mapping of old messageIds to new messageIds
+      const messageIdMap = new Map<string, string>();
+      originalMessages.forEach(msg => {
+        messageIdMap.set(msg.messageId, v4());
+      });
+
+      // Clone messages with new IDs and updated parentMessageId references
+      const clonedMessages: t.TMessage[] = originalMessages.map((msg) => {
+        const newMessageId = messageIdMap.get(msg.messageId)!;
+        let newParentMessageId: string | null = Constants.NO_PARENT;
+        if (msg.parentMessageId && msg.parentMessageId !== Constants.NO_PARENT) {
+          newParentMessageId = messageIdMap.get(msg.parentMessageId) || Constants.NO_PARENT;
+        }
+
+        return {
+          ...msg,
+          messageId: newMessageId,
+          conversationId: newConversationId,
+          parentMessageId: newParentMessageId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      // Create new conversation object
+      const newConversation: t.TConversation = {
+        ...originalConvo,
+        conversationId: newConversationId,
+        title: originalConvo.title || 'Untitled' || null,
+        messages: clonedMessages.map(m => m.messageId), // Store message IDs for TConversation type
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Save the duplicated conversation to Pod
+      const saveResult = await saveConversation({
+        ...newConversation,
+        messages: clonedMessages, // Pass full messages for Pod storage
+      } as unknown as t.TConversation);
+
+      if (saveResult.isError) {
+        throw new Error(saveResult.message || 'Failed to save duplicated conversation to Pod');
+      }
+
+      // Return in same format as API response
+      return {
+        conversation: newConversation,
+        messages: clonedMessages,
+      } as t.TDuplicateConvoResponse;
+    }
+
+    // Regular users: use API (existing flow)
+    return dataService.duplicateConversation(payload);
+  }, {
     onSuccess: (data, vars, context) => {
       const duplicatedConversation = data.conversation;
       if (!duplicatedConversation?.conversationId) {

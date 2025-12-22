@@ -82,6 +82,15 @@ function SolidAuthInner({ children }: { children: ReactNode }) {
     onError: (error) => {
       setIsAuthenticating(false);
       sessionStorage.removeItem(SOLID_AUTH_IN_PROGRESS_KEY);
+      
+      // Clean up URL params even on error to prevent infinite loop
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('code') || urlParams.has('state') || urlParams.has('iss')) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      
+      // Reset the ref so user can try again if needed
+      hasCalledBackend.current = false;
     },
   });
 
@@ -92,6 +101,10 @@ function SolidAuthInner({ children }: { children: ReactNode }) {
 
     // If user is already logged in to the app, nothing to do
     if (currentUser) {
+      // Clean up URL params if they're still there
+      if (hasCallbackParams) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
       return;
     }
 
@@ -100,9 +113,15 @@ function SolidAuthInner({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Wait for @ldo/solid-react to finish processing
-    // Call backend when: Solid session is logged in AND URL params are gone
-    if (session.isLoggedIn && session.webId && !hasCallbackParams) {
+    // Once @ldo/solid-react has processed the callback and session is logged in,
+    // Clean up URL params so backend call can proceed
+    if (session.isLoggedIn && session.webId && hasCallbackParams) {
+      
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    // Call backend when: Solid session is logged in (params are cleaned up above)
+    if (session.isLoggedIn && session.webId) {
       hasCalledBackend.current = true;
       solidAuthMutation.mutate({ webId: session.webId });
     }

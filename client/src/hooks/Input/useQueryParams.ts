@@ -335,7 +335,6 @@ export default function useQueryParams({
 
         setSearchParams(currentParams, { replace: true });
         processedRef.current = true;
-        console.log('Parameters processed successfully', paramString);
         clearInterval(intervalId);
 
         // Only clean URL if there's no pending submission
