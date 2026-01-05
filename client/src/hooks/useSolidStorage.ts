@@ -289,6 +289,7 @@ export function useSolidStorage() {
           assistant_id: conversation.assistant_id,
           spec: conversation.spec,
           tags: conversation.tags,
+          isArchived: conversation.isArchived,
         };
 
         // Upload as JSON file
@@ -521,6 +522,7 @@ export function useSolidStorage() {
               spec: conversationData.spec,
               tags: conversationData.tags,
               files: conversationData.files,
+              isArchived: conversationData.isArchived,
             } as TConversation;
             
             // Store full messages in a temporary location so we can access them later

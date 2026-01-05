@@ -234,9 +234,111 @@ export const useArchiveConvoMutation = (
   const convoQueryKey = [QueryKeys.allConversations];
   const archivedConvoQueryKey = [QueryKeys.archivedConversations];
   const { onMutate, onError, onSuccess, ..._options } = options || {};
+  const { isSolidUser, saveConversation, loadConversations } = useSolidStorage();
 
   return useMutation(
-    (payload: t.TArchiveConversationRequest) => dataService.archiveConversation(payload),
+    async (payload: t.TArchiveConversationRequest) => {
+      // If Solid user, update in Pod instead of API
+      if (isSolidUser && payload.conversationId) {
+        // Try to get current conversation from cache
+        let currentConvo = queryClient.getQueryData<t.TConversation>([
+          QueryKeys.conversation,
+          payload.conversationId,
+          { isSolidUser },
+        ]);
+        
+        // If not found, try without the isSolidUser key
+        if (!currentConvo) {
+          currentConvo = queryClient.getQueryData<t.TConversation>([
+            QueryKeys.conversation,
+            payload.conversationId,
+          ]);
+        }
+        
+        // If still not found, try to find in infinite query cache
+        if (!currentConvo) {
+          const convosQuery = queryClient.getQueryData<InfiniteData<ConversationCursorData>>(
+            [QueryKeys.allConversations],
+            { exact: false },
+          );
+          if (convosQuery) {
+            const found = convosQuery.pages
+              .flatMap(page => page.conversations || [])
+              .find(c => c.conversationId === payload.conversationId);
+            if (found) {
+              currentConvo = found;
+            }
+          }
+        }
+        
+        // If still not found, try archived conversations
+        if (!currentConvo) {
+          const archivedQuery = queryClient.getQueryData<InfiniteData<ConversationCursorData>>(
+            [QueryKeys.archivedConversations],
+            { exact: false },
+          );
+          if (archivedQuery) {
+            const found = archivedQuery.pages
+              .flatMap(page => page.conversations || [])
+              .find(c => c.conversationId === payload.conversationId);
+            if (found) {
+              currentConvo = found;
+            }
+          }
+        }
+        
+        // If still not found, load from Pod
+        if (!currentConvo) {
+          const conversations = await loadConversations();
+          currentConvo = conversations.find(c => c.conversationId === payload.conversationId);
+        }
+        
+        if (currentConvo) {
+          // Get messages from cache
+          let cachedMessages = queryClient.getQueryData<t.TMessage[]>([
+            QueryKeys.messages,
+            payload.conversationId,
+          ]);
+          
+          // If messages not in cache, try to get from conversation's _fullMessages
+          if (!cachedMessages || cachedMessages.length === 0) {
+            if ((currentConvo as any)?._fullMessages) {
+              cachedMessages = (currentConvo as any)._fullMessages as t.TMessage[];
+            }
+          }
+          
+          // Update conversation with new archive status
+          const updatedConvo: t.TConversation = {
+            ...currentConvo,
+            isArchived: payload.isArchived,
+            updatedAt: new Date().toISOString(),
+          } as t.TConversation;
+          
+          // Save to Pod with full messages
+          const convoToSave = {
+            ...updatedConvo,
+            messages: cachedMessages || [],
+          } as unknown as t.TConversation;
+          
+          const result = await saveConversation(convoToSave);
+          if (result.isError) {
+            logger.error('Solid Storage', 'Failed to update archive status in Pod', {
+              error: result.message,
+              conversationId: payload.conversationId,
+              isArchived: payload.isArchived,
+            });
+            throw new Error(result.message || 'Failed to update archive status in Pod');
+          }
+          
+          // Return in same format as API response
+          return updatedConvo as t.TArchiveConversationResponse;
+        }
+        throw new Error('Conversation not found');
+      }
+      
+      // Regular users: use API (existing flow)
+      return dataService.archiveConversation(payload);
+    },
     {
       onMutate,
       onSuccess: (_data, vars, context) => {
@@ -285,6 +387,21 @@ export const useArchiveConvoMutation = (
           [QueryKeys.conversation, vars.conversationId],
           isArchived ? null : _data,
         );
+
+        // If archiving and the conversation is currently open, dispatch event to trigger navigation
+        if (isArchived && typeof window !== 'undefined') {
+          const currentPath = window.location.pathname;
+          const conversationPath = `/c/${vars.conversationId}`;
+          
+          // Check if we're currently viewing the archived conversation
+          if (currentPath === conversationPath || currentPath.startsWith(conversationPath + '/')) {
+  
+            // ChatRoute will listen to this and navigate using React Router
+            window.dispatchEvent(new CustomEvent('archive-navigation', { 
+              detail: { conversationId: vars.conversationId } 
+            }));
+          }
+        }
 
         onSuccess?.(_data, vars, context);
       },

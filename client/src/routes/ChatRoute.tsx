@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Spinner } from '@librechat/client';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Constants, EModelEndpoint } from 'librechat-data-provider';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
 import type { TPreset } from 'librechat-data-provider';
@@ -20,6 +20,7 @@ export default function ChatRoute() {
   const { isAuthenticated, user } = useAuthRedirect();
   const [searchParams] = useSearchParams();
   const { isSolidUser } = useSolidStorage();
+  const navigate = useNavigate();
   
   // Check if we have Solid OIDC callback params or auth in progress
   const checkSolidAuth = () => {
@@ -66,6 +67,33 @@ export default function ChatRoute() {
   const assistantListMap = useAssistantListMap();
 
   const isTemporaryChat = conversation && conversation.expiredAt ? true : false;
+
+  // Listen for archive navigation event
+  useEffect(() => {
+    const handleArchiveNavigation = (event: CustomEvent<{ conversationId: string }>) => {
+      if (event.detail.conversationId === conversationId) {
+        // Navigate to new chat when current conversation is archived
+        navigate('/c/new', { replace: true });
+      }
+    };
+
+    window.addEventListener('archive-navigation', handleArchiveNavigation as EventListener);
+    return () => {
+      window.removeEventListener('archive-navigation', handleArchiveNavigation as EventListener);
+    };
+  }, [conversationId, navigate]);
+
+  // Check if conversation is archived and redirect
+  useEffect(() => {
+    if (
+      conversationId &&
+      conversationId !== Constants.NEW_CONVO &&
+      initialConvoQuery.data &&
+      initialConvoQuery.data.isArchived === true
+    ) {
+      navigate('/c/new', { replace: true });
+    }
+  }, [conversationId, initialConvoQuery.data, navigate]);
 
   useEffect(() => {
     if (conversationId !== Constants.NEW_CONVO && !isTemporaryChat) {

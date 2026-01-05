@@ -154,10 +154,12 @@ export const useConversationsInfiniteQuery = (
           );
         }
         
-        if (isArchived !== undefined) {
-          filtered = filtered.filter(conv => 
-            isArchived ? conv.isArchived === true : conv.isArchived !== true
-          );
+        // Filter by archive status
+        // Default to showing non-archived conversations when isArchived is undefined
+        if (isArchived === true) {
+          filtered = filtered.filter(conv => conv.isArchived === true);
+        } else {
+          filtered = filtered.filter(conv => conv.isArchived !== true);
         }
         
         // Sort conversations
