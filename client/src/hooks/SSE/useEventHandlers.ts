@@ -663,6 +663,15 @@ export default function useEventHandlers({
                     title: finalConversation.title,
                     messageCount: messagesToSave.length,
                   });
+                  
+                  // Invalidate conversations query to ensure fresh data when navigating back
+                  // This ensures that when the user navigates away and back, they get the latest version
+                  queryClient.invalidateQueries([QueryKeys.allConversations], { exact: false });
+                  queryClient.invalidateQueries([QueryKeys.conversation, conversation.conversationId], { exact: false });
+                  
+                  // Also update the messages cache to ensure it has the latest messages
+                  // This prevents the issue where messages disappear when navigating back
+                  queryClient.setQueryData<TMessage[]>([QueryKeys.messages, conversation.conversationId], messagesToSave);
                 }
               }).catch((err) => {
                 logger.error('Solid Storage', 'Error saving conversation to Pod', {

@@ -5,7 +5,9 @@ import { Copy, CopyCheck } from 'lucide-react';
 import { useGetSharedLinkQuery } from 'librechat-data-provider/react-query';
 import { OGDialogTemplate, Button, Spinner, OGDialog } from '@librechat/client';
 import { useLocalize, useCopyToClipboard } from '~/hooks';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
 import SharedLinkButton from './SharedLinkButton';
+import SolidShareDialog from './SolidShareDialog';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -29,6 +31,29 @@ export default function ShareButton({
   const copyLink = useCopyToClipboard({ text: sharedLink });
   const latestMessage = useRecoilValue(store.latestMessageFamily(0));
   const { data: share, isLoading } = useGetSharedLinkQuery(conversationId);
+  const { isSolidUser, getConversationPodUrl } = useSolidStorage();
+  const [podUrl, setPodUrl] = useState<string | null>(null);
+  const [isLoadingPodUrl, setIsLoadingPodUrl] = useState(false);
+
+  // Load Pod URL for Solid users
+  useEffect(() => {
+    if (isSolidUser && open && conversationId) {
+      setIsLoadingPodUrl(true);
+      getConversationPodUrl(conversationId)
+        .then((url) => {
+          setPodUrl(url);
+        })
+        .catch((err) => {
+          console.error('Failed to get Pod URL:', err);
+          setPodUrl(null);
+        })
+        .finally(() => {
+          setIsLoadingPodUrl(false);
+        });
+    } else {
+      setPodUrl(null);
+    }
+  }, [isSolidUser, open, conversationId, getConversationPodUrl]);
 
   useEffect(() => {
     if (share?.shareId !== undefined) {
@@ -36,6 +61,42 @@ export default function ShareButton({
       setSharedLink(link);
     }
   }, [share]);
+
+  // For Solid users, show SolidShareDialog instead
+  if (isSolidUser && podUrl) {
+    return (
+      <OGDialog open={open} onOpenChange={onOpenChange} triggerRef={triggerRef}>
+        {children}
+        <OGDialogTemplate
+          showCloseButton={true}
+          showCancelButton={false}
+          title={localize('com_ui_share_link_to_chat')}
+          className="max-w-[550px]"
+          main={<SolidShareDialog conversationId={conversationId} podUrl={podUrl} onClose={() => onOpenChange(false)} />}
+        />
+      </OGDialog>
+    );
+  }
+
+  // Show loading state while fetching Pod URL
+  if (isSolidUser && isLoadingPodUrl) {
+    return (
+      <OGDialog open={open} onOpenChange={onOpenChange} triggerRef={triggerRef}>
+        {children}
+        <OGDialogTemplate
+          showCloseButton={true}
+          showCancelButton={false}
+          title={localize('com_ui_share_link_to_chat')}
+          className="max-w-[550px]"
+          main={
+            <div className="flex items-center justify-center py-8">
+              <Spinner className="h-8 w-8 animate-spin" />
+            </div>
+          }
+        />
+      </OGDialog>
+    );
+  }
 
   const button =
     isLoading === true ? null : (

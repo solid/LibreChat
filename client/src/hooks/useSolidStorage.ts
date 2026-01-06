@@ -289,6 +289,7 @@ export function useSolidStorage() {
           assistant_id: conversation.assistant_id,
           spec: conversation.spec,
           tags: conversation.tags,
+          isArchived: conversation.isArchived,
         };
 
         // Upload as JSON file
@@ -363,6 +364,23 @@ export function useSolidStorage() {
         setIsLoading(false);
         return [];
       }
+      
+      // Force a fresh read by reading the container again if we have solidFetch
+      // This ensures we get the latest version, not a cached one
+      if (solidFetch) {
+        try {
+          await solidFetch(container.uri, {
+            method: 'HEAD',
+            headers: { 
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
+          });
+        } catch (e) {
+          // Ignore errors - we'll proceed with the data we have
+          logger.debug('Solid Storage', 'Cache-busting HEAD request failed (non-critical)', e);
+        }
+      }
 
       const conversations: TConversation[] = [];
 
@@ -434,7 +452,11 @@ export function useSolidStorage() {
             // Fallback to solidFetch if getResource didn't work
             if (!text && solidFetch) {
               const response = await solidFetch(child.uri, {
-                headers: { 'Accept': 'application/json' }
+                headers: { 
+                  'Accept': 'application/json',
+                  'Cache-Control': 'no-cache',
+                  'Pragma': 'no-cache',
+                }
               });
               if (response.ok) {
                 text = await response.text();
@@ -521,6 +543,7 @@ export function useSolidStorage() {
               spec: conversationData.spec,
               tags: conversationData.tags,
               files: conversationData.files,
+              isArchived: conversationData.isArchived,
             } as TConversation;
             
             // Store full messages in a temporary location so we can access them later
@@ -643,6 +666,137 @@ export function useSolidStorage() {
     [isSolidUser, getConversationContainer, getResource],
   );
 
+  /**
+   * Get the Pod URL for a conversation file
+   */
+  const getConversationPodUrl = useCallback(
+    async (conversationId: string): Promise<string | null> => {
+      if (!session.webId || !isSolidUser) {
+        return null;
+      }
+
+      try {
+        const webIdResource = getResource(session.webId) as any;
+        const rootResult = await webIdResource.getRootContainer();
+
+        if (rootResult.isError) {
+          return null;
+        }
+
+        // Construct the full URL to the conversation file
+        const fileName = `${conversationId}.json`;
+        const containerPath = CONVERSATION_FOLDER.endsWith('/')
+          ? CONVERSATION_FOLDER
+          : CONVERSATION_FOLDER + '/';
+        const fileUrl = `${rootResult.uri}${containerPath}${fileName}`;
+
+        return fileUrl;
+      } catch (err) {
+        logger.error('Solid Storage', 'Error getting conversation Pod URL', err);
+        return null;
+      }
+    },
+    [session.webId, isSolidUser, getResource],
+  );
+
+  /**
+   * Load a conversation from a Pod URL (for shared links)
+   */
+  const loadConversationFromPod = useCallback(
+    async (podUrl: string): Promise<TConversation | null> => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        let text: string | null = null;
+
+        // Try using getResource first
+        try {
+          const resource = getResource(podUrl) as any;
+          const readResult = await resource.read();
+
+          if (!readResult.isError && readResult.resource && (readResult.resource as any).isBinary()) {
+            const blob = (readResult.resource as any).getBlob();
+            if (blob) {
+              text = await blob.text();
+            }
+          }
+        } catch (e) {
+          logger.debug('Solid Storage', 'getResource failed, trying session.fetch', { podUrl, error: e });
+        }
+
+        // Fallback to solidFetch if getResource didn't work
+        if (!text && solidFetch) {
+          const response = await solidFetch(podUrl, {
+            headers: { Accept: 'application/json' },
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch conversation: ${response.statusText}`);
+          }
+
+          text = await response.text();
+        }
+
+        if (!text) {
+          throw new Error('Failed to load conversation from Pod URL');
+        }
+
+        const conversationData: ConversationFile = JSON.parse(text);
+
+        // Convert stored messages back to TMessage format
+        const messages: TMessage[] = (conversationData.messages || []).map((msg: StoredMessage) => ({
+          messageId: msg.messageId,
+          conversationId: msg.conversationId || conversationData.conversationId || null,
+          parentMessageId: msg.parentMessageId || null,
+          text: msg.text || '',
+          sender: msg.sender || (msg.isCreatedByUser ? 'User' : 'AI'),
+          isCreatedByUser: msg.isCreatedByUser || false,
+          model: msg.model || undefined,
+          endpoint: msg.endpoint || undefined,
+          createdAt: msg.createdAt || new Date().toISOString(),
+          updatedAt: msg.updatedAt || new Date().toISOString(),
+          content: msg.content,
+          error: msg.error,
+          finish_reason: msg.finish_reason || undefined,
+        } as TMessage));
+
+        // Convert to TConversation format
+        const conversation: TConversation = {
+          conversationId: conversationData.conversationId || null,
+          title: conversationData.title || 'Untitled',
+          endpoint: (conversationData.endpoint as any) || null,
+          model: conversationData.model || null,
+          createdAt: conversationData.createdAt || new Date().toISOString(),
+          updatedAt: conversationData.updatedAt || new Date().toISOString(),
+          messages: messages.map((m) => m.messageId), // Store message IDs
+          temperature: conversationData.temperature,
+          top_p: conversationData.top_p,
+          system: conversationData.system,
+          promptPrefix: conversationData.promptPrefix,
+          agent_id: conversationData.agent_id,
+          assistant_id: conversationData.assistant_id,
+          spec: conversationData.spec,
+          tags: conversationData.tags,
+          isArchived: conversationData.isArchived,
+        } as TConversation;
+
+        // Attach full messages to conversation object for caching
+        (conversation as any)._fullMessages = messages;
+
+        setIsLoading(false);
+        return conversation;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error loading conversation';
+        setError(errorMsg);
+        setIsLoading(false);
+        logger.error('Solid Storage', 'Error loading conversation from Pod URL', err);
+        return null;
+      }
+    },
+    [getResource, solidFetch],
+  );
+
   return {
     isSolidUser,
     isSessionReady,
@@ -652,6 +806,8 @@ export function useSolidStorage() {
     loadConversations,
     deleteConversation,
     getConversationContainer,
+    getConversationPodUrl,
+    loadConversationFromPod,
   };
 }
 

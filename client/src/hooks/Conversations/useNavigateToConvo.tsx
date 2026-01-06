@@ -12,10 +12,12 @@ import type {
 import { getDefaultEndpoint, clearMessagesCache, buildDefaultConvo, logger } from '~/utils';
 import { useApplyModelSpecEffects } from '~/hooks/Agents';
 import store from '~/store';
+import { useSolidStorage } from '~/hooks/useSolidStorage';
 
 const useNavigateToConvo = (index = 0) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isSolidUser } = useSolidStorage();
   const clearAllConversations = store.useClearConvoState();
   const applyModelSpecEffects = useApplyModelSpecEffects();
   const setSubmission = useSetRecoilState(store.submissionByIndex(index));
@@ -105,7 +107,15 @@ const useNavigateToConvo = (index = 0) => {
       });
     }
     clearAllConversations(true);
-    clearMessagesCache(queryClient, currentConvoId);
+    
+    if (!isSolidUser) {
+      clearMessagesCache(queryClient, currentConvoId);
+    } else {
+      if (currentConvoId && currentConvoId !== Constants.NEW_CONVO) {
+        queryClient.invalidateQueries([QueryKeys.messages, currentConvoId], { exact: true });
+      }
+    }
+    
     if (convo.conversationId !== Constants.NEW_CONVO && convo.conversationId) {
       queryClient.invalidateQueries([QueryKeys.conversation, convo.conversationId]);
       fetchFreshData(convo);

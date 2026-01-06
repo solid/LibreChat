@@ -37,13 +37,44 @@ export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
             // Check if full messages are attached (before they're moved to cache)
             const fullMessages = (conversation as any)._fullMessages as t.TMessage[] | undefined;
             if (fullMessages && fullMessages.length > 0) {
-              // Store in cache for future use
+              
+              const cachedMessages = queryClient.getQueryData<t.TMessage[]>([QueryKeys.messages, id]);
+              if (cachedMessages && cachedMessages.length > 0) {
+                // Compare message counts - if cache has more messages, it's likely newer
+                if (cachedMessages.length > fullMessages.length) {
+                 
+                  // Don't overwrite cache - return cached messages instead
+                  return cachedMessages;
+                }
+                
+                // If counts are equal, check the latest message timestamp
+                // Cache is newer if its latest message is more recent
+                const cacheLatest = cachedMessages[cachedMessages.length - 1];
+                const podLatest = fullMessages[fullMessages.length - 1];
+                const cacheTime = cacheLatest?.updatedAt || cacheLatest?.createdAt;
+                const podTime = podLatest?.updatedAt || podLatest?.createdAt;
+                
+                if (cacheTime && podTime && new Date(cacheTime) > new Date(podTime)) {
+                  
+                  return cachedMessages;
+                }
+              }
+              
+              // Only update cache if Pod data is newer or cache is empty
               queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
               return fullMessages;
             }
           }
         } catch (err) {
           logger.error('Solid Storage', 'Failed to load messages from Pod', { id, error: err });
+        }
+        
+        // If we get here, either conversation not found or no messages
+        // Check cache one more time in case it was populated while we were loading
+        const finalCacheCheck = queryClient.getQueryData<t.TMessage[]>([QueryKeys.messages, id]);
+        if (finalCacheCheck && finalCacheCheck.length > 0) {
+         
+          return finalCacheCheck;
         }
         
         return [];

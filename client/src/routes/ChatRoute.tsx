@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Spinner } from '@librechat/client';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { Constants, EModelEndpoint } from 'librechat-data-provider';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Constants, EModelEndpoint, QueryKeys } from 'librechat-data-provider';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
-import type { TPreset } from 'librechat-data-provider';
+import type { TPreset, TConversation, TMessage } from 'librechat-data-provider';
 import { useGetConvoIdQuery, useGetStartupConfig, useGetEndpointsQuery } from '~/data-provider';
 import { useNewConvo, useAppStartup, useAssistantListMap, useIdChangeEffect } from '~/hooks';
 import { useSolidStorage } from '~/hooks/useSolidStorage';
@@ -20,6 +21,7 @@ export default function ChatRoute() {
   const { isAuthenticated, user } = useAuthRedirect();
   const [searchParams] = useSearchParams();
   const { isSolidUser } = useSolidStorage();
+  const navigate = useNavigate();
   
   // Check if we have Solid OIDC callback params or auth in progress
   const checkSolidAuth = () => {
@@ -49,23 +51,89 @@ export default function ChatRoute() {
   useAppStartup({ startupConfig, user });
 
   const index = 0;
-  const { conversationId = '' } = useParams();
-  useIdChangeEffect(conversationId);
+  const { conversationId: rawConversationId = '' } = useParams();
+  
+  // Check if conversationId is an encoded Pod URL
+  const isEncodedPodUrl = rawConversationId.startsWith('https%3A%2F%2F') || rawConversationId.startsWith('http%3A%2F%2F');
+  const podUrl = isEncodedPodUrl ? decodeURIComponent(rawConversationId) : null;
+  const conversationId = isEncodedPodUrl ? null : rawConversationId;
+  
+  useIdChangeEffect(conversationId || '');
   const { hasSetConversation, conversation } = store.useCreateConversationAtom(index);
   const { newConversation } = useNewConvo();
+  const { loadConversationFromPod: loadFromPod } = useSolidStorage();
+  const queryClient = useQueryClient();
+  const [sharedConversation, setSharedConversation] = useState<TConversation | null>(null);
+  const [isLoadingShared, setIsLoadingShared] = useState(false);
+
+  // Load shared conversation from Pod URL if needed
+  useEffect(() => {
+    if (podUrl && !isLoadingShared && !sharedConversation) {
+      setIsLoadingShared(true);
+      loadFromPod(podUrl)
+        .then((convo) => {
+          if (convo) {
+            setSharedConversation(convo);
+            // Store messages in cache
+            const messages = (convo as any)._fullMessages as TMessage[] | undefined;
+            if (messages && convo.conversationId) {
+              queryClient.setQueryData<TMessage[]>([QueryKeys.messages, convo.conversationId], messages);
+              // Remove the temporary _fullMessages property
+              delete (convo as any)._fullMessages;
+            }
+          }
+        })
+        .catch((err) => {
+          logger.error('ChatRoute', 'Failed to load shared conversation', err);
+        })
+        .finally(() => {
+          setIsLoadingShared(false);
+        });
+    }
+  }, [podUrl, loadFromPod, isLoadingShared, sharedConversation]);
 
   const modelsQuery = useGetModelsQuery({
     enabled: effectivelyAuthenticated,
     refetchOnMount: 'always',
   });
-  const initialConvoQuery = useGetConvoIdQuery(conversationId, {
+  const initialConvoQuery = useGetConvoIdQuery(conversationId || '', {
     enabled:
-      effectivelyAuthenticated && conversationId !== Constants.NEW_CONVO && !hasSetConversation.current,
+      effectivelyAuthenticated &&
+      conversationId !== Constants.NEW_CONVO &&
+      !hasSetConversation.current &&
+      !isEncodedPodUrl,
   });
   const endpointsQuery = useGetEndpointsQuery({ enabled: effectivelyAuthenticated });
   const assistantListMap = useAssistantListMap();
 
   const isTemporaryChat = conversation && conversation.expiredAt ? true : false;
+
+  // Listen for archive navigation event
+  useEffect(() => {
+    const handleArchiveNavigation = (event: CustomEvent<{ conversationId: string }>) => {
+      if (event.detail.conversationId === conversationId) {
+        // Navigate to new chat when current conversation is archived
+        navigate('/c/new', { replace: true });
+      }
+    };
+
+    window.addEventListener('archive-navigation', handleArchiveNavigation as EventListener);
+    return () => {
+      window.removeEventListener('archive-navigation', handleArchiveNavigation as EventListener);
+    };
+  }, [conversationId, navigate]);
+
+  // Check if conversation is archived and redirect
+  useEffect(() => {
+    if (
+      conversationId &&
+      conversationId !== Constants.NEW_CONVO &&
+      initialConvoQuery.data &&
+      initialConvoQuery.data.isArchived === true
+    ) {
+      navigate('/c/new', { replace: true });
+    }
+  }, [conversationId, initialConvoQuery.data, navigate]);
 
   useEffect(() => {
     if (conversationId !== Constants.NEW_CONVO && !isTemporaryChat) {
@@ -96,6 +164,14 @@ export default function ChatRoute() {
         ...(spec ? { preset: getModelSpecPreset(spec) } : {}),
       });
 
+      hasSetConversation.current = true;
+    } else if (sharedConversation && endpointsQuery.data && modelsQuery.data) {
+      newConversation({
+        template: sharedConversation,
+        preset: sharedConversation as TPreset,
+        modelsData: modelsQuery.data,
+        keepLatestMessage: true,
+      });
       hasSetConversation.current = true;
     } else if (initialConvoQuery.data && endpointsQuery.data && modelsQuery.data) {
       logger.log('conversation', 'ChatRoute initialConvoQuery', initialConvoQuery.data);
@@ -144,7 +220,7 @@ export default function ChatRoute() {
     assistantListMap,
   ]);
 
-  if (endpointsQuery.isLoading || modelsQuery.isLoading) {
+  if (endpointsQuery.isLoading || modelsQuery.isLoading || (isEncodedPodUrl && isLoadingShared)) {
     return (
       <div className="flex h-screen items-center justify-center" aria-live="polite" role="status">
         <Spinner className="text-text-primary" />
@@ -161,17 +237,25 @@ export default function ChatRoute() {
   if (conversation?.conversationId === Constants.SEARCH) {
     return null;
   }
-  // if conversationId not match
-  if (conversation?.conversationId !== conversationId && !conversation) {
+  // For shared conversations from Pod URL, use sharedConversation
+  const effectiveConversation = isEncodedPodUrl ? sharedConversation : conversation;
+  
+  // if conversationId not match (only for non-shared conversations)
+  if (!isEncodedPodUrl && effectiveConversation?.conversationId !== conversationId && !effectiveConversation) {
     return null;
   }
-  // if conversationId is null
-  if (!conversationId) {
+  // if conversationId is null (only for non-shared conversations)
+  if (!isEncodedPodUrl && !conversationId) {
+    return null;
+  }
+  
+  // For shared conversations, ensure we have the conversation loaded
+  if (isEncodedPodUrl && !sharedConversation) {
     return null;
   }
 
   return (
-    <ToolCallsMapProvider conversationId={conversation.conversationId ?? ''}>
+    <ToolCallsMapProvider conversationId={effectiveConversation?.conversationId ?? ''}>
       <ChatView index={index} />
     </ToolCallsMapProvider>
   );
