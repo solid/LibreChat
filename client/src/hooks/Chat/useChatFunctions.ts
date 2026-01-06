@@ -148,7 +148,10 @@ export default function useChatFunctions({
       parentMessageId = Constants.NO_PARENT;
       currentMessages = [];
       conversationId = null;
-      navigate('/c/new', { state: { focusChat: true } });
+      // Only navigate if we're not already on /c/new to prevent interrupting form submission
+      if (window.location.pathname !== '/c/new') {
+        navigate('/c/new', { state: { focusChat: true } });
+      }
     }
 
     const targetParentMessageId = isRegenerate ? messageId : latestMessage?.parentMessageId;
