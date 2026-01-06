@@ -81,7 +81,34 @@ export const useGetConvoIdQuery = (
           // If the conversation has full messages attached, store them in the messages cache
           const fullMessages = (solidConvo as any)._fullMessages as t.TMessage[] | undefined;
           if (fullMessages && fullMessages.length > 0) {
-            queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
+            // Check if cache has newer/more messages before overwriting
+            const cachedMessages = queryClient.getQueryData<t.TMessage[]>([QueryKeys.messages, id]);
+            if (cachedMessages && cachedMessages.length > 0) {
+              // If cache has more messages, it's likely newer - don't overwrite
+              if (cachedMessages.length > fullMessages.length) {
+               
+              } else if (cachedMessages.length === fullMessages.length) {
+                // If counts are equal, check timestamps
+                const cacheLatest = cachedMessages[cachedMessages.length - 1];
+                const podLatest = fullMessages[fullMessages.length - 1];
+                const cacheTime = cacheLatest?.updatedAt || cacheLatest?.createdAt;
+                const podTime = podLatest?.updatedAt || podLatest?.createdAt;
+                
+                if (cacheTime && podTime && new Date(cacheTime) > new Date(podTime)) {
+                  
+                  // Don't overwrite - cache is newer
+                } else {
+                  // Pod is newer or equal - update cache
+                  queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
+                }
+              } else {
+                // Pod has more messages - update cache
+                queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
+              }
+            } else {
+              // No cache - safe to set
+              queryClient.setQueryData<t.TMessage[]>([QueryKeys.messages, id], fullMessages);
+            }
             // Remove the temporary _fullMessages property
             delete (solidConvo as any)._fullMessages;
           }
