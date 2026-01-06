@@ -46,8 +46,12 @@ export default function useSubmitMessage() {
       const rootIndex = addedIndex - 1;
       const clientTimestamp = new Date().toISOString();
 
+      // Store the text before resetting, as reset might clear it before ask() processes it
+      const messageText = data.text;
+
+      // Call ask() first to start the submission process
       ask({
-        text: data.text,
+        text: messageText,
         overrideConvoId: appendIndex(rootIndex, overrideConvoId),
         overrideUserMessageId: appendIndex(rootIndex, overrideUserMessageId),
         clientTimestamp,
@@ -56,7 +60,7 @@ export default function useSubmitMessage() {
       if (hasAdded) {
         askAdditional(
           {
-            text: data.text,
+            text: messageText,
             overrideConvoId: appendIndex(addedIndex, overrideConvoId),
             overrideUserMessageId: appendIndex(addedIndex, overrideUserMessageId),
             clientTimestamp,
@@ -64,7 +68,12 @@ export default function useSubmitMessage() {
           { overrideMessages: rootMessages },
         );
       }
-      methods.reset();
+
+      // Delay reset to ensure ask() has started processing and navigation (if any) has completed
+      // This prevents the form from resetting before the submission is properly initiated
+      setTimeout(() => {
+        methods.reset();
+      }, 0);
     },
     [
       ask,
