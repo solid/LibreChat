@@ -86,9 +86,9 @@ export default function SolidProviderModal({
 
   return (
     <OGDialog open={open} onOpenChange={onOpenChange}>
-      <OGDialogContent className="w-11/12 max-w-md sm:w-3/4 md:w-1/2">
+      <OGDialogContent className="w-11/12 max-w-md sm:w-3/4 md:w-1/2" data-testid="solid-provider-modal">
         <OGDialogHeader>
-          <OGDialogTitle className="text-xl font-semibold">
+          <OGDialogTitle className="text-xl font-semibold" data-testid="solid-provider-modal-title">
             {localize('com_auth_solid_provider_title')}
           </OGDialogTitle>
           <OGDialogDescription className="text-sm text-text-secondary">
@@ -113,6 +113,7 @@ export default function SolidProviderModal({
               placeholder={localize('com_auth_solid_provider_input_placeholder')}
               className="w-full rounded-lg border border-border-light bg-surface-primary px-4 py-2 text-text-primary placeholder:text-text-secondary focus:border-border-focus focus:outline-none focus:ring-2 focus:ring-border-focus"
               aria-label={localize('com_auth_solid_provider_input_label')}
+              data-testid="solid-provider-url-input"
             />
           </div>
 
@@ -121,7 +122,7 @@ export default function SolidProviderModal({
             <p className="text-sm font-medium text-text-primary">
               {localize('com_auth_solid_provider_list_label')}
             </p>
-            <div className="space-y-2 rounded-lg border border-border-light bg-surface-secondary p-2">
+            <div className="space-y-2 rounded-lg border border-border-light bg-surface-secondary p-2" data-testid="solid-provider-list">
               {DEFAULT_PROVIDERS.map((provider) => (
                 <button
                   key={provider.url}
@@ -134,6 +135,7 @@ export default function SolidProviderModal({
                   }`}
                   aria-pressed={selectedProvider?.url === provider.url && !isCustomMode}
                   aria-label={`${localize('com_auth_solid_provider_select')} ${provider.name}`}
+                  data-testid={`solid-provider-${provider.name.toLowerCase().replace(/\s+/g, '-')}`}
                 >
                   <div className="font-semibold text-text-primary">{provider.name}</div>
                   <div className="text-sm text-text-secondary">{provider.url}</div>
@@ -150,6 +152,7 @@ export default function SolidProviderModal({
             onClick={() => onOpenChange(false)}
             className="rounded-lg border border-border-light bg-surface-secondary px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-border-focus"
             aria-label={localize('com_ui_cancel')}
+            data-testid="solid-provider-cancel"
           >
             {localize('com_ui_cancel')}
           </button>
@@ -159,11 +162,12 @@ export default function SolidProviderModal({
             disabled={!isValid || isLoading}
             className="rounded-lg bg-green-500 px-4 py-2 text-sm font-medium text-white hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={isLoading ? localize('com_ui_loading') : localize('com_ui_next')}
+            data-testid="solid-provider-next"
           >
             {isLoading ? localize('com_ui_loading') || 'Loading...' : localize('com_ui_next')}
           </button>
           {externalError && (
-            <p className="mt-2 text-sm text-red-500" role="alert">
+            <p className="mt-2 text-sm text-red-500" role="alert" data-testid="solid-provider-error">
               {externalError}
             </p>
           )}

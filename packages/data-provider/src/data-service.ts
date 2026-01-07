@@ -102,9 +102,8 @@ export const login = (payload: t.TLoginUser): Promise<t.TLoginResponse> => {
   return request.post(endpoints.login(), payload);
 };
 
-export const solidAuth = (payload: { webId: string }): Promise<t.TLoginResponse> => {
-  return request.post(endpoints.solidAuth(), payload);
-};
+// Note: solidAuth has been removed - Solid authentication is now handled
+// server-side via proper OIDC flow at /oauth/solid
 
 export const logout = (): Promise<m.TLogoutResponse> => {
   return request.post(endpoints.logout());

@@ -37,7 +37,7 @@ const SocialButton = ({ id, enabled, serverDomain, oauthPath, Icon, label, onCli
           aria-label={label}
           className="flex w-full items-center space-x-3 rounded-2xl border border-border-light bg-surface-primary px-5 py-3 text-text-primary transition-colors duration-200 hover:bg-surface-tertiary"
           onClick={handleClick}
-          data-testid={id}
+          data-testid={`social-button-${id}`}
         >
           {buttonContent}
         </button>
@@ -51,7 +51,7 @@ const SocialButton = ({ id, enabled, serverDomain, oauthPath, Icon, label, onCli
         aria-label={label}
         className="flex w-full items-center space-x-3 rounded-2xl border border-border-light bg-surface-primary px-5 py-3 text-text-primary transition-colors duration-200 hover:bg-surface-tertiary"
         href={`${serverDomain}/oauth/${oauthPath}`}
-        data-testid={id}
+        data-testid={`social-button-${id}`}
       >
         {buttonContent}
       </a>

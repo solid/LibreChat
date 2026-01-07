@@ -34,6 +34,10 @@ const namespaces = {
   [CacheKeys.OPENID_SESSION]: sessionCache(CacheKeys.OPENID_SESSION),
   [CacheKeys.SAML_SESSION]: sessionCache(CacheKeys.SAML_SESSION),
 
+  // Solid OIDC caches
+  [CacheKeys.SOLID_OIDC_CONFIG]: standardCache(CacheKeys.SOLID_OIDC_CONFIG, Time.ONE_HOUR),
+  [CacheKeys.SOLID_AUTH_STATE]: standardCache(CacheKeys.SOLID_AUTH_STATE, Time.TEN_MINUTES),
+
   [CacheKeys.ROLES]: standardCache(CacheKeys.ROLES),
   [CacheKeys.APP_CONFIG]: standardCache(CacheKeys.APP_CONFIG),
   [CacheKeys.CONFIG_STORE]: standardCache(CacheKeys.CONFIG_STORE),

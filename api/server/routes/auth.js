@@ -17,7 +17,6 @@ const {
 const { verify2FAWithTempToken } = require('~/server/controllers/auth/TwoFactorAuthController');
 const { logoutController } = require('~/server/controllers/auth/LogoutController');
 const { loginController } = require('~/server/controllers/auth/LoginController');
-const { solidAuthController } = require('~/server/controllers/auth/SolidAuthController');
 const { getAppConfig } = require('~/server/services/Config');
 const middleware = require('~/server/middleware');
 const { Balance } = require('~/db/models');
@@ -73,13 +72,8 @@ router.post('/2fa/backup/regenerate', middleware.requireJwtAuth, regenerateBacku
 
 router.get('/graph-token', middleware.requireJwtAuth, graphTokenController);
 
-// Solid authentication endpoint
-router.post(
-  '/solid',
-  middleware.logHeaders,
-  middleware.loginLimiter,
-  middleware.checkBan,
-  solidAuthController,
-);
+// Note: Solid authentication is now handled via proper OIDC flow at /oauth/solid
+// The old POST /api/auth/solid endpoint has been removed for security reasons
+// (it trusted WebID without server-side verification)
 
 module.exports = router;

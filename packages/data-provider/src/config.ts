@@ -1325,6 +1325,14 @@ export enum CacheKeys {
    * Key for SAML session.
    */
   SAML_SESSION = 'SAML_SESSION',
+  /**
+   * Key for Solid OIDC configuration cache.
+   */
+  SOLID_OIDC_CONFIG = 'SOLID_OIDC_CONFIG',
+  /**
+   * Key for Solid OIDC auth state cache (for PKCE flow).
+   */
+  SOLID_AUTH_STATE = 'SOLID_AUTH_STATE',
 }
 
 /**

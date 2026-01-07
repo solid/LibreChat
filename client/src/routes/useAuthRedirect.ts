@@ -8,34 +8,20 @@ export default function useAuthRedirect() {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    // Check if we have Solid OIDC callback param
-    // Use sessionStorage flag (set by SolidAuthProvider) + URL params for reliability
-    const checkCallback = () => {
-      if (typeof window !== 'undefined') {
-        const authInProgress = sessionStorage.getItem('solid_auth_in_progress') === 'true';
-        if (authInProgress) {
-          return true;
-        }
-      }
-      // Fallback to URL params
-      if (typeof window !== 'undefined') {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('code') && urlParams.has('state')) {
-          return true;
-        }
-      }
-      return searchParams.has('code') && searchParams.has('state');
-    };
+    // Check if we have OAuth callback params (code + state)
+    // This handles any OAuth provider including Solid
+    const hasOAuthCallback = searchParams.has('code') && searchParams.has('state');
     
-    const hasSolidCallback = checkCallback();
-    
-    if (hasSolidCallback) {
+    if (hasOAuthCallback) {
+      // OAuth callback in progress, don't redirect yet
       return; 
     }
     
     const timeout = setTimeout(() => {
-
-      const stillHasCallback = checkCallback();
+      // Re-check for callback params in case they were added
+      const urlParams = new URLSearchParams(window.location.search);
+      const stillHasCallback = urlParams.has('code') && urlParams.has('state');
+      
       if (!isAuthenticated && !stillHasCallback) {
         navigate('/login', { replace: true });
       }

@@ -10,6 +10,7 @@ const { syncUserEntraGroupMemberships } = require('~/server/services/PermissionS
 const { setAuthTokens, setOpenIDAuthTokens } = require('~/server/services/AuthService');
 const { getAppConfig } = require('~/server/services/Config');
 const { Balance } = require('~/db/models');
+const solidStrategy = require('~/strategies/solidStrategy');
 
 const setBalanceConfig = createSetBalanceConfig({
   getAppConfig,
@@ -224,5 +225,120 @@ router.post(
   }),
   oauthHandler,
 );
+
+/**
+ * Solid OIDC Routes
+ *
+ * Solid requires dynamic issuer discovery since users can choose their pod provider.
+ * The issuer URL is passed as a query parameter and validated against allowed issuers.
+ */
+
+/**
+ * Client Identifier Document endpoint
+ * Required by Solid-OIDC when using a URL as client_id
+ * @see https://solidproject.org/TR/oidc#clientids-document
+ */
+router.get('/solid/client-id', (req, res) => {
+  const clientId = `${process.env.DOMAIN_SERVER}/oauth/solid/client-id`;
+  const redirectUri = `${process.env.DOMAIN_SERVER}/oauth/solid/callback`;
+  
+  const clientDocument = {
+    '@context': 'https://www.w3.org/ns/solid/oidc-context.jsonld',
+    'client_id': clientId,
+    'client_name': 'LibreChat',
+    'redirect_uris': [redirectUri],
+    'client_uri': domains.client,
+    'scope': 'openid webid offline_access',
+    'grant_types': ['authorization_code', 'refresh_token'],
+    'response_types': ['code'],
+  };
+
+  res.setHeader('Content-Type', 'application/ld+json');
+  res.json(clientDocument);
+});
+
+router.get('/solid', async (req, res) => {
+  try {
+    const { issuer } = req.query;
+
+    if (!issuer) {
+      logger.warn('[oauth/solid] No issuer provided');
+      return res.redirect(`${domains.client}/login?error=solid_no_issuer`);
+    }
+
+    // Validate issuer URL
+    try {
+      new URL(issuer);
+    } catch {
+      logger.warn(`[oauth/solid] Invalid issuer URL: ${issuer}`);
+      return res.redirect(`${domains.client}/login?error=solid_invalid_issuer`);
+    }
+
+    // Get authorization URL
+    const result = await solidStrategy.getAuthorizationUrl(issuer);
+    if (!result) {
+      logger.error(`[oauth/solid] Failed to get auth URL for issuer: ${issuer}`);
+      return res.redirect(`${domains.client}/login?error=solid_discovery_failed`);
+    }
+
+    logger.info(`[oauth/solid] Redirecting to Solid provider: ${issuer}`);
+    res.redirect(result.authUrl);
+  } catch (error) {
+    logger.error('[oauth/solid] Error initiating Solid auth:', error);
+    res.redirect(`${domains.client}/login?error=${ErrorTypes.AUTH_FAILED}`);
+  }
+});
+
+router.get('/solid/callback', async (req, res, next) => {
+  try {
+    const { code, state, error: oauthError, error_description } = req.query;
+
+    // Handle OAuth errors from provider
+    if (oauthError) {
+      logger.error(`[oauth/solid/callback] OAuth error: ${oauthError} - ${error_description}`);
+      return res.redirect(`${domains.client}/login?error=${ErrorTypes.AUTH_FAILED}`);
+    }
+
+    if (!code || !state) {
+      logger.warn('[oauth/solid/callback] Missing code or state');
+      return res.redirect(`${domains.client}/login?error=${ErrorTypes.AUTH_FAILED}`);
+    }
+
+    // Check ban status
+    await checkBan(req, res);
+    if (req.banned) {
+      return;
+    }
+
+    // Handle the callback
+    const result = await solidStrategy.handleCallback(code, state);
+
+    if (result.error) {
+      logger.error(`[oauth/solid/callback] ${result.error}`);
+      return res.redirect(`${domains.client}/login?error=${ErrorTypes.AUTH_FAILED}`);
+    }
+
+    // Set the user on request for downstream handlers
+    req.user = result.user;
+
+    // Set auth tokens and redirect
+    await setAuthTokens(req.user._id, res);
+    logger.info(`[oauth/solid/callback] Redirecting to: ${domains.client}`);
+    res.redirect(domains.client);
+  } catch (error) {
+    logger.error('[oauth/solid/callback] Error:', error);
+    res.redirect(`${domains.client}/login?error=${ErrorTypes.AUTH_FAILED}`);
+  }
+});
+
+/**
+ * Solid providers endpoint - returns list of available Solid providers
+ * Used by frontend to display provider selection
+ */
+router.get('/solid/providers', (req, res) => {
+  const providers = solidStrategy.getAvailableProviders();
+  const allowCustom = isEnabled(process.env.SOLID_ALLOW_ANY_ISSUER);
+  res.json({ providers, allowCustom });
+});
 
 module.exports = router;

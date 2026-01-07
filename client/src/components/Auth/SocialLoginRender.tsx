@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useSolidAuth } from '@ldo/solid-react';
 import { useSearchParams } from 'react-router-dom';
 import {
   GoogleIcon,
@@ -26,55 +25,39 @@ function SocialLoginRender({
 }) {
   const localize = useLocalize();
   const [isSolidModalOpen, setIsSolidModalOpen] = useState(false);
-  const { login, session } = useSolidAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
 
-  // Check if we're processing an OIDC callback
-  const hasOidcCallback = searchParams.has('code') && searchParams.has('state');
-  
-  // Don't show modal or allow login if we're processing a callback or already logged in
+  // Check for Solid auth errors in URL params
   useEffect(() => {
-    if (hasOidcCallback || session.isLoggedIn) {
-      setIsSolidModalOpen(false);
+    const solidError = searchParams.get('error');
+    if (solidError?.startsWith('solid_')) {
+      setError(`Solid authentication failed: ${solidError.replace('solid_', '').replace(/_/g, ' ')}`);
     }
-  }, [hasOidcCallback, session.isLoggedIn]);
+  }, [searchParams]);
 
   const handleSolidClick = () => {
     setIsSolidModalOpen(true);
   };
 
+  /**
+   * Handle Solid provider selection - redirects to backend OAuth endpoint
+   * This is the secure server-side OIDC flow
+   */
   const handleProviderSelect = async (issuer: string) => {
-    // Don't initiate login if we're already processing a callback
-    if (hasOidcCallback || session.isLoggedIn) {
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
 
-    // Clear Solid auth flag to ensure a clean login
-    sessionStorage.removeItem('solid_auth_in_progress');
-    
-    // Clear ALL localStorage keys from previous Solid sessions
-    // This ensures @ldo/solid-react starts fresh
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (
-        key.startsWith('solidClientAuthn') || 
-        key.startsWith('solidClientAuthenticationUser') || 
-        key.startsWith('oidc.')
-      )) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach(key => localStorage.removeItem(key));
-
     try {
-      const redirectUrl = `${window.location.origin}/c/new`;
-      await login(issuer, { redirectUrl });
+      // Redirect to backend OAuth endpoint with selected issuer
+      // The backend will handle OIDC discovery, authorization, and callback
+      const serverDomain = startupConfig?.serverDomain || '';
+      const oauthUrl = `${serverDomain}/oauth/solid?issuer=${encodeURIComponent(issuer)}`;
+      
+      // Close modal and redirect
+      setIsSolidModalOpen(false);
+      window.location.href = oauthUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
       setIsLoading(false);

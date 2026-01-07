@@ -136,7 +136,8 @@ export const logout = () => `${BASE_URL}/api/auth/logout`;
 
 export const register = () => `${BASE_URL}/api/auth/register`;
 
-export const solidAuth = () => `${BASE_URL}/api/auth/solid`;
+// Note: solidAuth endpoint has been removed - Solid authentication is now handled
+// via proper OIDC flow at /oauth/solid (not /api/auth/solid)
 
 export const loginFacebook = () => `${BASE_URL}/api/auth/facebook`;
 
