@@ -4,6 +4,7 @@
 data-node
 meili_data*
 data/
+css-server/data/
 logs
 *.log
 

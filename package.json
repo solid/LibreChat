@@ -39,6 +39,7 @@
     "backend:dev": "cross-env NODE_ENV=development npx nodemon api/server/index.js",
     "backend:experimental": "cross-env NODE_ENV=production node api/server/experimental.js",
     "backend:stop": "node config/stop-backend.js",
+    "css:start": "community-solid-server --port ${CSS_PORT:-3000} --loggingLevel info --config css-server/config.json --rootFilePath css-server/data --seedConfig css-server/seed-config.json",
     "build:data-provider": "cd packages/data-provider && npm run build",
     "build:api": "cd packages/api && npm run build",
     "build:data-schemas": "cd packages/data-schemas && npm run build",
