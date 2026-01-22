@@ -162,6 +162,23 @@ const startServer = async () => {
   app.use('/api/tags', routes.tags);
   app.use('/api/mcp', routes.mcp);
 
+  // Solid-OIDC Client ID Document route, see spec https://solidproject.org/TR/oidc#clientids-document
+  // TODO: Expose this route only if adequate according to config, i.e. when Solid-OIDC is in use
+  // TODO: Follow 'app.use' pattern instead of inlining route here
+  // TODO: Make path configurable instead of hardcoding here
+  app.get('/solid-client-id', (_, res) => {
+    // TODO: Use constants/enums for header name and value if available from framework
+    res.set('Content-Type', 'application/ld+json');
+
+    res.send({
+      '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
+
+      // TODO: Take host & port from config or API instead of hardcoding
+      // TODO: Take callback path from config or API instead of hardcoding
+      redirect_uris: ['http://localhost:3080/oauth/openid/callback'],
+    });
+  });
+
   app.use(ErrorController);
 
   app.use((req, res) => {
