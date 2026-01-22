@@ -321,6 +321,7 @@ async function setupSolidOpenId() {
       undefined,
       {
         [client.customFetch]: customFetch,
+        execute: [client.allowInsecureRequests], // TODO: Insecure! Remove deprecated hack used for local HTTP only.
       },
     );
 
