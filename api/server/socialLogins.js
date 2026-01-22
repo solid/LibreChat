@@ -7,7 +7,7 @@ const {
   openIdJwtLogin,
   facebookLogin,
   discordLogin,
-  MysetupOpenId,
+  setupSolidOpenId,
   googleLogin,
   githubLogin,
   appleLogin,
@@ -36,7 +36,7 @@ async function configureOpenId(app) {
   app.use(session(sessionOptions));
   app.use(passport.session());
 
-  const config = await MysetupOpenId();
+  const config = await setupSolidOpenId();
   if (!config) {
     logger.error('OpenID Connect configuration failed - strategy not registered.');
     return;

@@ -32,11 +32,11 @@ const getLogStores = require('~/cache/getLogStores');
  */
 async function customFetch(url, options) {
   const urlStr = url.toString();
-  logger.debug(`[MyopenidStrategy] Request to: ${urlStr}`);
+  logger.debug(`[SolidOpenidStrategy] Request to: ${urlStr}`);
   const debugOpenId = isEnabled(process.env.DEBUG_OPENID_REQUESTS);
   if (debugOpenId) {
-    logger.debug(`[MyopenidStrategy] Request method: ${options.method || 'GET'}`);
-    logger.debug(`[MyopenidStrategy] Request headers: ${logHeaders(options.headers)}`);
+    logger.debug(`[SolidOpenidStrategy] Request method: ${options.method || 'GET'}`);
+    logger.debug(`[SolidOpenidStrategy] Request headers: ${logHeaders(options.headers)}`);
     if (options.body) {
       let bodyForLogging = '';
       if (options.body instanceof URLSearchParams) {
@@ -46,7 +46,7 @@ async function customFetch(url, options) {
       } else {
         bodyForLogging = safeStringify(options.body);
       }
-      logger.debug(`[MyopenidStrategy] Request body: ${bodyForLogging}`);
+      logger.debug(`[SolidOpenidStrategy] Request body: ${bodyForLogging}`);
     }
   }
 
@@ -54,7 +54,7 @@ async function customFetch(url, options) {
     /** @type {undici.RequestInit} */
     let fetchOptions = options;
     if (process.env.PROXY) {
-      logger.info(`[MyopenidStrategy] proxy agent configured: ${process.env.PROXY}`);
+      logger.info(`[SolidOpenidStrategy] proxy agent configured: ${process.env.PROXY}`);
       fetchOptions = {
         ...options,
         dispatcher: new undici.ProxyAgent(process.env.PROXY),
@@ -64,13 +64,13 @@ async function customFetch(url, options) {
     const response = await undici.fetch(url, fetchOptions);
 
     if (debugOpenId) {
-      logger.debug(`[MyopenidStrategy] Response status: ${response.status} ${response.statusText}`);
-      logger.debug(`[MyopenidStrategy] Response headers: ${logHeaders(response.headers)}`);
+      logger.debug(`[SolidOpenidStrategy] Response status: ${response.status} ${response.statusText}`);
+      logger.debug(`[SolidOpenidStrategy] Response headers: ${logHeaders(response.headers)}`);
     }
 
     if (response.status === 200 && response.headers.has('www-authenticate')) {
       const wwwAuth = response.headers.get('www-authenticate');
-      logger.warn(`[MyopenidStrategy] Non-standard WWW-Authenticate header found in successful response (200 OK): ${wwwAuth}.
+      logger.warn(`[SolidOpenidStrategy] Non-standard WWW-Authenticate header found in successful response (200 OK): ${wwwAuth}.
 This violates RFC 7235 and may cause issues with strict OAuth clients. Removing header for compatibility.`);
 
       /** Cloned response without the WWW-Authenticate header */
@@ -91,7 +91,7 @@ This violates RFC 7235 and may cause issues with strict OAuth clients. Removing 
 
     return response;
   } catch (error) {
-    logger.error(`[MyopenidStrategy] Fetch error: ${error.message}`);
+    logger.error(`[SolidOpenidStrategy] Fetch error: ${error.message}`);
     throw error;
   }
 }
@@ -122,7 +122,7 @@ class CustomOpenIDStrategy extends OpenIDStrategy {
     if (process.env.OPENID_AUDIENCE) {
       params.set('audience', process.env.OPENID_AUDIENCE);
       logger.debug(
-        `[MyopenidStrategy] Adding audience to authorization request: ${process.env.OPENID_AUDIENCE}`,
+        `[SolidOpenidStrategy] Adding audience to authorization request: ${process.env.OPENID_AUDIENCE}`,
       );
     }
 
@@ -132,7 +132,7 @@ class CustomOpenIDStrategy extends OpenIDStrategy {
       const crypto = require('crypto');
       const nonce = crypto.randomBytes(16).toString('hex');
       params.set('nonce', nonce);
-      logger.debug('[MyopenidStrategy] Generated nonce for federated provider:', nonce);
+      logger.debug('[SolidOpenidStrategy] Generated nonce for federated provider:', nonce);
     }
 
     return params;
@@ -190,7 +190,7 @@ const getUserInfo = async (config, accessToken, sub) => {
     const exchangedAccessToken = await exchangeAccessTokenIfNeeded(config, accessToken, sub);
     return await client.fetchUserInfo(config, exchangedAccessToken, sub);
   } catch (error) {
-    logger.error('[MyopenidStrategy] getUserInfo: Error fetching user info:', error);
+    logger.error('[SolidOpenidStrategy] getUserInfo: Error fetching user info:', error);
     return null;
   }
 };
@@ -231,7 +231,7 @@ const downloadImage = async (url, config, accessToken, sub) => {
     }
   } catch (error) {
     logger.error(
-      `[MyopenidStrategy] downloadImage: Error downloading image at URL "${url}": ${error}`,
+      `[SolidOpenidStrategy] downloadImage: Error downloading image at URL "${url}": ${error}`,
     );
     return '';
   }
@@ -297,7 +297,7 @@ function convertToUsername(input, defaultValue = '') {
  * @returns {Promise<Configuration | null>} A promise that resolves when the OpenID strategy is set up and returns the openid client config object.
  * @throws {Error} If an error occurs during the setup process.
  */
-async function MysetupOpenId() {
+async function setupSolidOpenId() {
   try {
     const shouldGenerateNonce = isEnabled(process.env.OPENID_GENERATE_NONCE);
 
@@ -328,7 +328,7 @@ async function MysetupOpenId() {
     const requiredRoleParameterPath = process.env.OPENID_REQUIRED_ROLE_PARAMETER_PATH;
     const requiredRoleTokenKind = process.env.OPENID_REQUIRED_ROLE_TOKEN_KIND;
     const usePKCE = isEnabled(process.env.OPENID_USE_PKCE);
-    logger.info(`[MyopenidStrategy] OpenID authentication configuration`, {
+    logger.info(`[SolidOpenidStrategy] OpenID authentication configuration`, {
       generateNonce: shouldGenerateNonce,
       reason: shouldGenerateNonce
         ? 'OPENID_GENERATE_NONCE=true - Will generate nonce and use explicit metadata for federated providers'
@@ -366,7 +366,7 @@ async function MysetupOpenId() {
           const email = userinfo.email || userinfo.preferred_username || userinfo.upn || `${userinfo.webid}@FAKEDOMAIN.TLD`;
           if (!isEmailDomainAllowed(email, appConfig?.registration?.allowedDomains)) {
             logger.error(
-              `[My OpenID Strategy] Authentication blocked - email domain not allowed [Email: ${email}]`,
+              `[SolidOpenidStrategy] Authentication blocked - email domain not allowed [Email: ${email}]`,
             );
             return done(null, false, { message: 'Email domain not allowed' });
           }
@@ -376,7 +376,7 @@ async function MysetupOpenId() {
             email: email,
             openidId: claims.sub,
             idOnTheSource: claims.oid,
-            strategyName: 'MyopenidStrategy',
+            strategyName: 'SolidOpenidStrategy',
           });
           let user = result.user;
           const error = result.error;
@@ -404,7 +404,7 @@ async function MysetupOpenId() {
             let roles = get(decodedToken, requiredRoleParameterPath);
             if (!roles || (!Array.isArray(roles) && typeof roles !== 'string')) {
               logger.error(
-                `[MyopenidStrategy] Key '${requiredRoleParameterPath}' not found or invalid type in ${requiredRoleTokenKind} token!`,
+                `[SolidOpenidStrategy] Key '${requiredRoleParameterPath}' not found or invalid type in ${requiredRoleTokenKind} token!`,
               );
               const rolesList =
                 requiredRoles.length === 1
@@ -474,7 +474,7 @@ async function MysetupOpenId() {
                 break;
               default:
                 logger.error(
-                  `[MyopenidStrategy] Invalid admin role token kind: ${adminRoleTokenKind}. Must be one of 'access', 'id', or 'userinfo'.`,
+                  `[SolidOpenidStrategy] Invalid admin role token kind: ${adminRoleTokenKind}. Must be one of 'access', 'id', or 'userinfo'.`,
                 );
                 return done(new Error('Invalid admin role token kind'));
             }
@@ -494,12 +494,12 @@ async function MysetupOpenId() {
             ) {
               user.role = 'ADMIN';
               logger.info(
-                `[MyopenidStrategy] User ${username} is an admin based on role: ${adminRole}`,
+                `[SolidOpenidStrategy] User ${username} is an admin based on role: ${adminRole}`,
               );
             } else if (user.role === 'ADMIN') {
               user.role = 'USER';
               logger.info(
-                `[MyopenidStrategy] User ${username} demoted from admin - role no longer present in token`,
+                `[SolidOpenidStrategy] User ${username} demoted from admin - role no longer present in token`,
               );
             }
           }
@@ -537,7 +537,7 @@ async function MysetupOpenId() {
           user = await updateUser(user._id, user);
 
           logger.info(
-            `[MyopenidStrategy] login success openidId: ${user.openidId} | email: ${user.email} | username: ${user.username} `,
+            `[SolidOpenidStrategy] login success openidId: ${user.openidId} | email: ${user.email} | username: ${user.username} `,
             {
               user: {
                 openidId: user.openidId,
@@ -558,7 +558,7 @@ async function MysetupOpenId() {
             },
           });
         } catch (err) {
-          logger.error('[MyopenidStrategy] login failed', err);
+          logger.error('[SolidOpenidStrategy] login failed', err);
           done(err);
         }
       },
@@ -566,7 +566,7 @@ async function MysetupOpenId() {
     passport.use('openid', openidLogin);
     return openidConfig;
   } catch (err) {
-    logger.error('[MyopenidStrategy]', err);
+    logger.error('[SolidOpenidStrategy]', err);
     return null;
   }
 }
@@ -576,7 +576,7 @@ async function MysetupOpenId() {
  * @throws {Error} If the OpenID client is not initialized.
  * @returns {Configuration}
  */
-function MygetOpenIdConfig() {
+function getSolidOpenIdConfig() {
   if (!openidConfig) {
     throw new Error('OpenID client is not initialized. Please call setupOpenId first.');
   }
@@ -584,6 +584,6 @@ function MygetOpenIdConfig() {
 }
 
 module.exports = {
-  MysetupOpenId,
-  MygetOpenIdConfig,
+  setupSolidOpenId,
+  getSolidOpenIdConfig,
 };
