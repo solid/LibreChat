@@ -173,6 +173,9 @@ const startServer = async () => {
     res.send({
       '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
       redirect_uris: [process.env.DOMAIN_SERVER + process.env.OPENID_CALLBACK_URL],
+
+      // TODO: Don't hardcode path
+      client_id: process.env.DOMAIN_SERVER + '/solid-client-id',
     });
   });
 
