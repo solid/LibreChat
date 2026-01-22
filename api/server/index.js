@@ -170,10 +170,7 @@ const startServer = async () => {
 
     res.send({
       '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
-
-      // TODO: Take host & port from config or API instead of hardcoding
-      // TODO: Take callback path from config or API instead of hardcoding
-      redirect_uris: ['http://localhost:3080/oauth/openid/callback'],
+      redirect_uris: [process.env.DOMAIN_SERVER + process.env.OPENID_CALLBACK_URL],
     });
   });
 
