@@ -5,6 +5,11 @@ const discordLogin = require('./discordStrategy');
 const passportLogin = require('./localStrategy');
 const googleLogin = require('./googleStrategy');
 const githubLogin = require('./githubStrategy');
+const discordLogin = require('./discordStrategy');
+const facebookLogin = require('./facebookStrategy');
+const { setupSolidOpenId, getSolidOpenIdConfig } = require('./SolidOpenidStrategy');
+const jwtLogin = require('./jwtStrategy');
+const ldapLogin = require('./ldapStrategy');
 const { setupSaml } = require('./samlStrategy');
 const appleLogin = require('./appleStrategy');
 const ldapLogin = require('./ldapStrategy');
@@ -18,8 +23,8 @@ module.exports = {
   discordLogin,
   jwtLogin,
   facebookLogin,
-  MysetupOpenId,
-  MygetOpenIdConfig,
+  setupSolidOpenId,
+  getSolidOpenIdConfig,
   ldapLogin,
   setupSaml,
   openIdJwtLogin,
