@@ -46,7 +46,6 @@ router.get('/', async function (req, res) {
 
     const isOpenIdEnabled =
       !!process.env.OPENID_CLIENT_ID &&
-      !!process.env.OPENID_CLIENT_SECRET &&
       !!process.env.OPENID_ISSUER &&
       !!process.env.OPENID_SESSION_SECRET;
 
