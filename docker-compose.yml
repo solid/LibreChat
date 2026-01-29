@@ -28,6 +28,8 @@ services:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
   mongodb:
+    ports:
+      - "27017:27017"
     container_name: chat-mongodb
     image: mongo:8.0.17
     restart: always
