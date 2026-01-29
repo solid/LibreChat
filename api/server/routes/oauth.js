@@ -97,8 +97,42 @@ router.get('/openid', (req, res, next) => {
   })(req, res, next);
 });
 
+/**
+ * Middleware to log authorization code from Solid/OpenID provider
+ */
+const logAuthorizationCode = (req, res, next) => {
+  const { code, state, error } = req.query;
+  
+  if (code) {
+    logger.info('[OpenID Callback] Authorization code received from Solid provider', {
+      authorizationCode: code,
+      state: state || 'not provided',
+      hasError: !!error,
+      error: error || null,
+      queryParams: {
+        code: code ? 'present' : 'missing',
+        state: state || 'missing',
+        error: error || 'none',
+      },
+    });
+    logger.info(`[OpenID Callback] Full authorization code: ${code}`);
+  } else if (error) {
+    logger.warn('[OpenID Callback] OAuth error received (no authorization code)', {
+      error,
+      state: state || 'not provided',
+    });
+  } else {
+    logger.warn('[OpenID Callback] No authorization code or error in callback', {
+      queryParams: req.query,
+    });
+  }
+  
+  next();
+};
+
 router.get(
   '/openid/callback',
+  logAuthorizationCode,
   passport.authenticate('openid', {
     failureRedirect: `${domains.client}/oauth/error`,
     failureMessage: true,
