@@ -1031,6 +1031,10 @@ class BaseClient {
    * @param {Partial<TMessage>} message
    */
   async updateMessageInDatabase(message) {
+    // Ensure conversationId is included if available
+    if (!message.conversationId && this.conversationId) {
+      message.conversationId = this.conversationId;
+    }
     await updateMessage(this.options.req, message);
   }
 

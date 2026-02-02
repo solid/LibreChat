@@ -448,6 +448,8 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
 
     const refreshToken = tokenset.refresh_token || existingRefreshToken;
 
+    // Log warning if no refresh token, but continue with access token only
+    // Some providers (like Solid) may not provide refresh tokens
     if (!refreshToken) {
       logger.error('[setOpenIDAuthTokens] No refresh token available');
       return;
@@ -483,16 +485,48 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
       req.session.openidTokens = {
         accessToken: tokenset.access_token,
         idToken: tokenset.id_token,
-        refreshToken: refreshToken,
+        refreshToken: refreshToken || null, // Store null if no refresh token
         expiresAt: expirationDate.getTime(),
       };
+      
+      // Explicitly save the session to ensure it persists
+      req.session.save((err) => {
+        if (err) {
+          logger.error('[setOpenIDAuthTokens] Error saving session', {
+            error: err.message,
+            stack: err.stack,
+          });
+        } else {
+          logger.debug('[setOpenIDAuthTokens] Session saved successfully');
+        }
+      });
+      
+      logger.info('[setOpenIDAuthTokens] Tokens stored in session', {
+        hasAccessToken: !!tokenset.access_token,
+        hasRefreshToken: !!refreshToken,
+        sessionId: req.sessionID,
+        accessTokenLength: tokenset.access_token?.length,
+        expiresAt: expirationDate.toISOString(),
+      });
     } else {
       logger.warn('[setOpenIDAuthTokens] No session available, falling back to cookies');
+      if (refreshToken) {
+        res.cookie('refreshToken', refreshToken, {
+          expires: expirationDate,
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict',
+        });
+      }
       res.cookie('openid_access_token', tokenset.access_token, {
         expires: expirationDate,
         httpOnly: true,
         secure: shouldUseSecureCookie(),
         sameSite: 'strict',
+      });
+      logger.info('[setOpenIDAuthTokens] Tokens stored in cookies', {
+        hasAccessToken: !!tokenset.access_token,
+        hasRefreshToken: !!refreshToken,
       });
       if (tokenset.id_token) {
         res.cookie('openid_id_token', tokenset.id_token, {
