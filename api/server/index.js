@@ -103,6 +103,12 @@ const startServer = async () => {
   app.use(cors());
   app.use(cookieParser());
 
+  // Configure social logins (including session middleware) BEFORE passport initialization
+  // This ensures sessions are available for all requests, including JWT-authenticated ones
+  if (isEnabled(ALLOW_SOCIAL_LOGIN)) {
+    await configureSocialLogins(app);
+  }
+
   if (!isEnabled(DISABLE_COMPRESSION)) {
     app.use(compression());
   } else {
@@ -125,10 +131,6 @@ const startServer = async () => {
   /* LDAP Auth */
   if (process.env.LDAP_URL && process.env.LDAP_USER_SEARCH_BASE) {
     passport.use(ldapLogin);
-  }
-
-  if (isEnabled(ALLOW_SOCIAL_LOGIN)) {
-    await configureSocialLogins(app);
   }
 
   app.use('/oauth', routes.oauth);

@@ -44,6 +44,7 @@ router.get('/', async (req, res) => {
     const result = await getConvosByCursor(req.user.id, {
       cursor,
       limit,
+      req, // Pass req for Solid storage support
       isArchived,
       tags,
       search,
@@ -52,19 +53,55 @@ router.get('/', async (req, res) => {
     });
     res.status(200).json(result);
   } catch (error) {
-    logger.error('Error fetching conversations', error);
-    res.status(500).json({ error: 'Error fetching conversations' });
+    logger.error('Error fetching conversations', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      hasOpenidId: !!req.user?.openidId,
+      useSolidStorage: process.env.USE_SOLID_STORAGE,
+    });
+    res.status(500).json({ 
+      error: 'Error fetching conversations',
+      message: error.message, // Include actual error message for debugging
+    });
   }
 });
 
 router.get('/:conversationId', async (req, res) => {
   const { conversationId } = req.params;
-  const convo = await getConvo(req.user.id, conversationId);
+  
+  logger.info('[GET /api/convos/:conversationId] Fetching conversation', {
+    conversationId,
+    userId: req.user?.id,
+    hasOpenidId: !!req.user?.openidId,
+    useSolidStorage: isEnabled(process.env.USE_SOLID_STORAGE),
+  });
+  
+  try {
+    const convo = await getConvo(req.user.id, conversationId, req);
 
-  if (convo) {
-    res.status(200).json(convo);
-  } else {
-    res.status(404).end();
+    if (convo) {
+      logger.info('[GET /api/convos/:conversationId] Conversation found', {
+        conversationId,
+        title: convo.title,
+        messageCount: convo.messages?.length || 0,
+      });
+      res.status(200).json(convo);
+    } else {
+      logger.warn('[GET /api/convos/:conversationId] Conversation not found', {
+        conversationId,
+        userId: req.user?.id,
+      });
+      res.status(404).end();
+    }
+  } catch (error) {
+    logger.error('[GET /api/convos/:conversationId] Error fetching conversation', {
+      conversationId,
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+    });
+    res.status(500).json({ error: 'Error fetching conversation', message: error.message });
   }
 });
 

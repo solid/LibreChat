@@ -1,7 +1,10 @@
 const { logger } = require('@librechat/data-schemas');
-const { createTempChatExpirationDate } = require('@librechat/api');
+const { createTempChatExpirationDate, isEnabled } = require('@librechat/api');
 const { getMessages, deleteMessages } = require('./Message');
 const { Conversation } = require('~/db/models');
+
+// Feature flag to toggle between MongoDB and Solid storage
+const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
 
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
@@ -21,9 +24,34 @@ const searchConversation = async (conversationId) => {
  * Retrieves a single conversation for a given user and conversation ID.
  * @param {string} user - The user's ID.
  * @param {string} conversationId - The conversation's ID.
+ * @param {Object} [req] - Optional request object for Solid storage support.
  * @returns {Promise<TConversation>} The conversation object.
  */
-const getConvo = async (user, conversationId) => {
+const getConvo = async (user, conversationId, req = null) => {
+  // Use Solid storage if enabled and req is provided with openidId
+  if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+    try {
+      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+      const convo = await getConvoFromSolid(req, conversationId);
+      if (convo) {
+        return convo;
+      }
+      // If Solid storage returns null, fall through to MongoDB
+      logger.warn('[getConvo] Conversation not found in Solid Pod, falling back to MongoDB', {
+        conversationId,
+        userId: user,
+      });
+    } catch (error) {
+      logger.error('[getConvo] Error getting conversation from Solid Pod, falling back to MongoDB', {
+        error: error.message,
+        conversationId,
+        userId: user,
+      });
+      // Fall through to MongoDB storage
+    }
+  }
+
+  // MongoDB storage (original code)
   try {
     return await Conversation.findOne({ user, conversationId }).lean();
   } catch (error) {
@@ -87,6 +115,46 @@ module.exports = {
    * @returns {Promise<TConversation>} The conversation object.
    */
   saveConvo: async (req, { conversationId, newConversationId, ...convo }, metadata) => {
+    // Use Solid storage if enabled
+    if (USE_SOLID_STORAGE) {
+      try {
+        if (metadata?.context) {
+          logger.debug(`[saveConvo] ${metadata.context}`);
+        }
+
+        const { saveConvoToSolid } = require('~/server/services/SolidStorage');
+        
+        const convoData = {
+          conversationId,
+          newConversationId,
+          ...convo,
+        };
+
+        if (req?.body?.isTemporary) {
+          try {
+            const appConfig = req.config;
+            convoData.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+          } catch (err) {
+            logger.error('Error creating temporary chat expiration date:', err);
+            logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
+            convoData.expiredAt = null;
+          }
+        } else {
+          convoData.expiredAt = null;
+        }
+
+        const savedConvo = await saveConvoToSolid(req, convoData, metadata);
+        return savedConvo;
+      } catch (error) {
+        logger.error('[saveConvo] Error saving conversation to Solid Pod', error);
+        if (metadata && metadata?.context) {
+          logger.info(`[saveConvo] ${metadata.context}`);
+        }
+        return { message: 'Error saving conversation' };
+      }
+    }
+
+    // MongoDB storage (original code)
     try {
       if (metadata?.context) {
         logger.debug(`[saveConvo] ${metadata.context}`);
@@ -170,8 +238,31 @@ module.exports = {
       search,
       sortBy = 'updatedAt',
       sortDirection = 'desc',
+      req, // Optional req object for Solid storage
     } = {},
   ) => {
+    // Use Solid storage if enabled and req is provided
+    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+      try {
+        const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
+        return await getConvosByCursorFromSolid(req, {
+          cursor,
+          limit,
+          isArchived,
+          tags,
+          search,
+          sortBy,
+          sortDirection,
+        });
+      } catch (error) {
+        logger.warn('[getConvosByCursor] Error getting conversations from Solid Pod, falling back to MongoDB', {
+          error: error.message,
+          user: req.user?.id,
+          hasOpenidId: !!req.user?.openidId,
+        });
+        // Fall through to MongoDB storage
+      }
+    }
     const filters = [{ user }];
     if (isArchived) {
       filters.push({ isArchived: true });

@@ -68,70 +68,76 @@ const refreshController = async (req, res) => {
   const parsedCookies = req.headers.cookie ? cookies.parse(req.headers.cookie) : {};
   const token_provider = parsedCookies.token_provider;
 
+  // Handle OpenID users with OPENID_REUSE_TOKENS enabled
   if (token_provider === 'openid' && isEnabled(process.env.OPENID_REUSE_TOKENS)) {
-    /** For OpenID users, read refresh token from session to avoid large cookie issues */
+    /** For OpenID users with token reuse, read refresh token from session */
     const refreshToken = req.session?.openidTokens?.refreshToken || parsedCookies.refreshToken;
 
     if (!refreshToken) {
-      return res.status(200).send('Refresh token not provided');
-    }
-
-    try {
-      const openIdConfig = getOpenIdConfig();
-      const refreshParams = process.env.OPENID_SCOPE ? { scope: process.env.OPENID_SCOPE } : {};
+      // Solid provider may not provide refresh tokens - fall back to standard JWT refresh
+      logger.warn('[refreshController] No OpenID refresh token available, falling back to standard refresh');
+      // Fall through to standard refresh logic below
+    } else {
+      // We have a refresh token, use OpenID refresh flow
+      try {
+        const openIdConfig = getOpenIdConfig();
+        const refreshParams = process.env.OPENID_SCOPE ? { scope: process.env.OPENID_SCOPE } : {};
       const tokenset = await openIdClient.refreshTokenGrant(
         openIdConfig,
         refreshToken,
         refreshParams,
       );
-      const claims = tokenset.claims();
-      const { user, error, migration } = await findOpenIDUser({
-        findUser,
-        email: claims.email,
-        openidId: claims.sub,
-        idOnTheSource: claims.oid,
-        strategyName: 'refreshController',
-      });
-
-      logger.debug(
-        `[refreshController] findOpenIDUser result: user=${user?.email ?? 'null'}, error=${error ?? 'null'}, migration=${migration}, userOpenidId=${user?.openidId ?? 'null'}, claimsSub=${claims.sub}`,
-      );
-
-      if (error || !user) {
-        logger.warn(
-          `[refreshController] Redirecting to /login: error=${error ?? 'null'}, user=${user ? 'exists' : 'null'}`,
-        );
-        return res.status(401).redirect('/login');
-      }
-
-      // Handle migration: update user with openidId if found by email without openidId
-      // Also handle case where user has mismatched openidId (e.g., after database switch)
-      if (migration || user.openidId !== claims.sub) {
-        const reason = migration ? 'migration' : 'openidId mismatch';
-        await updateUser(user._id.toString(), {
-          provider: 'openid',
+        const claims = tokenset.claims();
+        const { user, error, migration } = await findOpenIDUser({
+          findUser,
+          email: claims.email,
           openidId: claims.sub,
+          idOnTheSource: claims.oid,
+          strategyName: 'refreshController',
         });
-        logger.info(
-          `[refreshController] Updated user ${user.email} openidId (${reason}): ${user.openidId ?? 'null'} -> ${claims.sub}`,
+
+        logger.debug(
+          `[refreshController] findOpenIDUser result: user=${user?.email ?? 'null'}, error=${error ?? 'null'}, migration=${migration}, userOpenidId=${user?.openidId ?? 'null'}, claimsSub=${claims.sub}`,
         );
+
+        if (error || !user) {
+          logger.warn(
+            `[refreshController] Redirecting to /login: error=${error ?? 'null'}, user=${user ? 'exists' : 'null'}`,
+          );
+          return res.status(401).redirect('/login');
+        }
+
+        // Handle migration: update user with openidId if found by email without openidId
+        // Also handle case where user has mismatched openidId (e.g., after database switch)
+        if (migration || user.openidId !== claims.sub) {
+          const reason = migration ? 'migration' : 'openidId mismatch';
+          await updateUser(user._id.toString(), {
+            provider: 'openid',
+            openidId: claims.sub,
+          });
+          logger.info(
+            `[refreshController] Updated user ${user.email} openidId (${reason}): ${user.openidId ?? 'null'} -> ${claims.sub}`,
+          );
+        }
+
+        const token = setOpenIDAuthTokens(tokenset, req, res, user._id.toString(), refreshToken);
+
+        user.federatedTokens = {
+          access_token: tokenset.access_token,
+          id_token: tokenset.id_token,
+          refresh_token: refreshToken,
+          expires_at: claims.exp,
+        };
+
+        return res.status(200).send({ token, user });
+      } catch (error) {
+        logger.error('[refreshController] OpenID token refresh error', error);
+        // Fall through to standard refresh logic as fallback
       }
-
-      const token = setOpenIDAuthTokens(tokenset, req, res, user._id.toString(), refreshToken);
-
-      user.federatedTokens = {
-        access_token: tokenset.access_token,
-        id_token: tokenset.id_token,
-        refresh_token: refreshToken,
-        expires_at: claims.exp,
-      };
-
-      return res.status(200).send({ token, user });
-    } catch (error) {
-      logger.error('[refreshController] OpenID token refresh error', error);
-      return res.status(403).send('Invalid OpenID refresh token');
     }
   }
+
+  /** For non-OpenID users or OpenID users without OPENID_REUSE_TOKENS, use standard JWT refresh */
 
   /** For non-OpenID users, read refresh token from cookies */
   const refreshToken = parsedCookies.refreshToken;

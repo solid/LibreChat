@@ -25,7 +25,50 @@ const domains = {
 router.use(logHeaders);
 router.use(loginLimiter);
 
-const oauthHandler = createOAuthHandler();
+const oauthHandler = async (req, res, next) => {
+  try {
+    if (res.headersSent) {
+      return;
+    }
+
+    await checkBan(req, res);
+    if (req.banned) {
+      return;
+    }
+    if (
+      req.user &&
+      req.user.provider == 'openid' &&
+      // isEnabled(process.env.OPENID_REUSE_TOKENS) === true
+      req.user.tokenset &&
+      req.user.tokenset.access_token
+    ) {
+      // Always store OpenID tokens in session (needed for Solid Pod access)
+      setOpenIDAuthTokens(req.user.tokenset, req, res, req.user._id.toString());
+      logger.info('[oauthHandler] OpenID tokens stored for Solid Pod access', {
+        userId: req.user._id.toString(),
+        hasAccessToken: !!req.user.tokenset.access_token,
+        hasRefreshToken: !!req.user.tokenset.refresh_token,
+      });
+      
+      // Also create JWT tokens for frontend authentication
+      // OPENID_REUSE_TOKENS determines if we use OpenID JWT or standard JWT
+      if (isEnabled(process.env.OPENID_REUSE_TOKENS) === true) {
+        await syncUserEntraGroupMemberships(req.user, req.user.tokenset.access_token);
+        // When OPENID_REUSE_TOKENS is enabled, setOpenIDAuthTokens handles JWT creation
+        // via the openidJwt strategy, so we don't need to call setAuthTokens
+      } else {
+        // When OPENID_REUSE_TOKENS is disabled, create standard JWT tokens
+        await setAuthTokens(req.user._id, res);
+      }
+    } else {
+      await setAuthTokens(req.user._id, res);
+    }
+    res.redirect(domains.client);
+  } catch (err) {
+    logger.error('Error in setting authentication tokens:', err);
+    next(err);
+  }
+};
 
 router.get('/error', (req, res) => {
   /** A single error message is pushed by passport when authentication fails. */
