@@ -1918,14 +1918,50 @@ async function deleteConvosFromSolid(req, conversationIds) {
           const messagesDeleted = await deleteMessagesFromSolid(req, {
             conversationId,
           });
-          logger.debug('[SolidStorage] Messages deleted for conversation', {
+          
+          logger.info('[SolidStorage] Messages deleted for conversation', {
             conversationId,
             messagesDeleted,
           });
+          
+          if (messagesDeleted === 0) {
+            logger.warn('[SolidStorage] No messages were deleted - this may indicate an issue', {
+              conversationId,
+            });
+          }
+          
+          // Also try to delete the messages container directory if it's empty
+          // This is optional - some Solid servers handle empty containers automatically
+          try {
+            const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
+            // Try to delete the container - this may fail if it's not empty or not allowed
+            // We'll just log and continue if it fails
+            try {
+              await deleteFile(messagesContainerPath, { fetch: authenticatedFetch });
+              logger.debug('[SolidStorage] Messages container directory deleted', {
+                conversationId,
+                messagesContainerPath,
+              });
+            } catch (containerError) {
+              // It's okay if we can't delete the container - the files are already deleted
+              logger.debug('[SolidStorage] Could not delete messages container (may not be empty or not allowed)', {
+                conversationId,
+                messagesContainerPath,
+                error: containerError.message,
+              });
+            }
+          } catch (containerPathError) {
+            // Ignore errors when trying to delete the container
+            logger.debug('[SolidStorage] Error getting messages container path for deletion', {
+              conversationId,
+              error: containerPathError.message,
+            });
+          }
         } catch (error) {
-          logger.warn('[SolidStorage] Error deleting messages for conversation, continuing', {
+          logger.error('[SolidStorage] Error deleting messages for conversation - THIS IS A PROBLEM', {
             conversationId,
             error: error.message,
+            stack: error.stack,
           });
           // Continue with conversation deletion even if messages fail
         }

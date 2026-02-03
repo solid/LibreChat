@@ -165,7 +165,7 @@ router.delete('/', async (req, res) => {
   }
 
   try {
-    const dbResponse = await deleteConvos(req.user.id, filter);
+    const dbResponse = await deleteConvos(req.user.id, filter, req); // Pass req for Solid storage support
     if (filter.conversationId) {
       await deleteToolCalls(req.user.id, filter.conversationId);
       await deleteConvoSharedLink(req.user.id, filter.conversationId);
@@ -179,7 +179,7 @@ router.delete('/', async (req, res) => {
 
 router.delete('/all', async (req, res) => {
   try {
-    const dbResponse = await deleteConvos(req.user.id, {});
+    const dbResponse = await deleteConvos(req.user.id, {}, req); // Pass req for Solid storage support
     await deleteToolCalls(req.user.id);
     await deleteAllSharedLinks(req.user.id);
     res.status(201).json(dbResponse);
