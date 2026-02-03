@@ -142,8 +142,8 @@ module.exports = {
    * @returns {Promise<TConversation>} The conversation object.
    */
   saveConvo: async (req, { conversationId, newConversationId, ...convo }, metadata) => {
-    // Use Solid storage if enabled
-    if (USE_SOLID_STORAGE) {
+    // Use Solid storage if enabled and user is a Solid user
+    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
       try {
         if (metadata?.context) {
           logger.debug(`[saveConvo] ${metadata.context}`);
@@ -177,7 +177,11 @@ module.exports = {
         if (metadata && metadata?.context) {
           logger.info(`[saveConvo] ${metadata.context}`);
         }
-        return { message: 'Error saving conversation' };
+        // Fall through to MongoDB if Solid save fails
+        logger.warn('[saveConvo] Falling back to MongoDB after Solid save failure', {
+          conversationId,
+          error: error.message,
+        });
       }
     }
 

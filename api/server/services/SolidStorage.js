@@ -1221,6 +1221,29 @@ async function saveConvoToSolid(req, convoData, metadata) {
     // Get conversation file path
     const conversationPath = getConversationPath(podUrl, finalConversationId);
 
+    // Check if conversation already exists and load it to preserve existing data
+    let existingConversation = null;
+    try {
+      const existingFile = await getFile(conversationPath, { fetch: authenticatedFetch });
+      const existingFileText = await existingFile.text();
+      existingConversation = JSON.parse(existingFileText);
+      logger.debug('[SolidStorage] Loaded existing conversation for merge', {
+        conversationId: finalConversationId,
+        hasTitle: !!existingConversation.title,
+      });
+    } catch (error) {
+      if (error.status === 404 || error.message?.includes('404')) {
+        logger.debug('[SolidStorage] Conversation does not exist yet, will create new', {
+          conversationId: finalConversationId,
+        });
+      } else {
+        logger.warn('[SolidStorage] Error loading existing conversation, will create new', {
+          conversationId: finalConversationId,
+          error: error.message,
+        });
+      }
+    }
+
     // Get messages for this conversation (just IDs for reference)
     // Note: We call getMessagesFromSolid directly since it's in the same module
     const messages = await getMessagesFromSolid(req, finalConversationId);
@@ -1229,9 +1252,16 @@ async function saveConvoToSolid(req, convoData, metadata) {
       createdAt: msg.createdAt,
     }));
 
+    // Start with existing conversation data if available, otherwise use defaults
+    const baseConversation = existingConversation || {
+      conversationId: finalConversationId,
+      user: req.user.id,
+      createdAt: new Date().toISOString(),
+    };
+
     // If model or endpoint are missing, try to extract them from messages
-    let finalModel = convoData.model;
-    let finalEndpoint = convoData.endpoint;
+    let finalModel = convoData.model ?? baseConversation.model;
+    let finalEndpoint = convoData.endpoint ?? baseConversation.endpoint;
     
     if (!finalModel || !finalEndpoint) {
       // Find the first message with a model (usually the AI response)
@@ -1256,26 +1286,28 @@ async function saveConvoToSolid(req, convoData, metadata) {
       }
     }
 
-    // Prepare conversation object
+    // Merge existing conversation with updates from convoData
+    // convoData takes precedence for fields that are explicitly provided
     const conversationToSave = {
       conversationId: finalConversationId,
       user: req.user.id,
-      title: convoData.title || null,
-      endpoint: finalEndpoint || null,
-      model: finalModel || null,
-      agent_id: convoData.agent_id || null,
-      assistant_id: convoData.assistant_id || null,
-      spec: convoData.spec || null,
-      iconURL: convoData.iconURL || null,
+      // Title: use new value if provided, otherwise preserve existing, otherwise null
+      title: convoData.title !== undefined ? (convoData.title || null) : (baseConversation.title || null),
+      endpoint: finalEndpoint || baseConversation.endpoint || null,
+      model: finalModel || baseConversation.model || null,
+      agent_id: convoData.agent_id !== undefined ? (convoData.agent_id || null) : (baseConversation.agent_id || null),
+      assistant_id: convoData.assistant_id !== undefined ? (convoData.assistant_id || null) : (baseConversation.assistant_id || null),
+      spec: convoData.spec !== undefined ? (convoData.spec || null) : (baseConversation.spec || null),
+      iconURL: convoData.iconURL !== undefined ? (convoData.iconURL || null) : (baseConversation.iconURL || null),
       messages: messageRefs,
-      files: convoData.files || [],
-      promptPrefix: convoData.promptPrefix || null,
-      temperature: convoData.temperature || null,
-      topP: convoData.topP || null,
-      presence_penalty: convoData.presence_penalty || null,
-      frequency_penalty: convoData.frequency_penalty || null,
-      expiredAt: convoData.expiredAt || null,
-      createdAt: convoData.createdAt || new Date().toISOString(),
+      files: convoData.files !== undefined ? (convoData.files || []) : (baseConversation.files || []),
+      promptPrefix: convoData.promptPrefix !== undefined ? (convoData.promptPrefix || null) : (baseConversation.promptPrefix || null),
+      temperature: convoData.temperature !== undefined ? (convoData.temperature || null) : (baseConversation.temperature || null),
+      topP: convoData.topP !== undefined ? (convoData.topP || null) : (baseConversation.topP || null),
+      presence_penalty: convoData.presence_penalty !== undefined ? (convoData.presence_penalty || null) : (baseConversation.presence_penalty || null),
+      frequency_penalty: convoData.frequency_penalty !== undefined ? (convoData.frequency_penalty || null) : (baseConversation.frequency_penalty || null),
+      expiredAt: convoData.expiredAt !== undefined ? (convoData.expiredAt || null) : (baseConversation.expiredAt || null),
+      createdAt: baseConversation.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
@@ -1289,27 +1321,8 @@ async function saveConvoToSolid(req, convoData, metadata) {
       messageCount: messageRefs.length,
     });
 
-    // Check if conversation already exists
-    let conversationExists = false;
-    try {
-      await getFile(conversationPath, { fetch: authenticatedFetch });
-      conversationExists = true;
-      logger.debug('[SolidStorage] Conversation file already exists, will overwrite', {
-        conversationPath,
-      });
-    } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
-        conversationExists = false;
-        logger.debug('[SolidStorage] Conversation file does not exist, will create', {
-          conversationPath,
-        });
-      } else {
-        logger.warn('[SolidStorage] Error checking if conversation exists, will try to save anyway', {
-          conversationPath,
-          error: error.message,
-        });
-      }
-    }
+    // Determine if conversation exists (we already loaded it above if it exists)
+    const conversationExists = existingConversation !== null;
 
     // If conversationId changed, delete old file
     if (convoData.newConversationId && convoData.conversationId !== convoData.newConversationId) {
