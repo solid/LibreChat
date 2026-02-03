@@ -325,6 +325,7 @@ router.post('/duplicate', async (req, res) => {
       userId: req.user.id,
       conversationId,
       title,
+      req, // Pass req for Solid storage support
     });
     res.status(201).json(result);
   } catch (error) {

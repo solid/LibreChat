@@ -358,26 +358,121 @@ function splitAtTargetLevel(messages, targetMessageId) {
  * @param {object} params - The parameters for duplicating the conversation.
  * @param {string} params.userId - The ID of the user duplicating the conversation.
  * @param {string} params.conversationId - The ID of the conversation to duplicate.
+ * @param {object} [params.req] - Optional Express request object for Solid storage support.
  * @returns {Promise<{ conversation: TConversation, messages: TMessage[] }>} The duplicated conversation and messages.
  */
-async function duplicateConversation({ userId, conversationId }) {
+async function duplicateConversation({ userId, conversationId, req }) {
+  const { isEnabled } = require('@librechat/api');
+  const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
+  const isSolidUser = USE_SOLID_STORAGE && req && req.user?.openidId;
+
   // Get original conversation
-  const originalConvo = await getConvo(userId, conversationId);
+  const originalConvo = await getConvo(userId, conversationId, req);
   if (!originalConvo) {
     throw new Error('Conversation not found');
   }
 
   // Get original messages
-  const originalMessages = await getMessages({
-    user: userId,
-    conversationId,
-  });
+  let originalMessages;
+  if (isSolidUser) {
+    const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
+    originalMessages = await getMessagesFromSolid(req, conversationId);
+  } else {
+    originalMessages = await getMessages({
+      user: userId,
+      conversationId,
+    });
+  }
+
+  if (!originalMessages || originalMessages.length === 0) {
+    throw new Error('No messages found in conversation');
+  }
 
   const messagesToClone = getMessagesUpToTargetLevel(
     originalMessages,
     originalMessages[originalMessages.length - 1].messageId,
   );
 
+  // For Solid users, save individually to support Solid storage
+  if (isSolidUser) {
+    const { saveConvo } = require('~/models/Conversation');
+    const { saveMessage } = require('~/models/Message');
+    const { v4: uuidv4 } = require('uuid');
+    const newConversationId = uuidv4();
+    const now = new Date();
+
+    // Create ID mapping for parent message relationships
+    const idMapping = new Map();
+    const sortedMessages = [...messagesToClone].sort((a, b) => {
+      if (a.parentMessageId === Constants.NO_PARENT) {
+        return -1;
+      }
+      if (b.parentMessageId === Constants.NO_PARENT) {
+        return 1;
+      }
+      return 0;
+    });
+
+    // First pass: create ID mapping
+    for (const message of sortedMessages) {
+      const newMessageId = uuidv4();
+      idMapping.set(message.messageId, newMessageId);
+    }
+
+    // Create new conversation
+    const newConvo = {
+      ...originalConvo,
+      conversationId: newConversationId,
+      title: originalConvo.title,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    delete newConvo._id;
+
+    // Save conversation
+    await saveConvo(req, newConvo, { context: 'duplicateConversation' });
+
+    // Save messages individually with proper parent ID mapping
+    const savedMessages = [];
+    for (const message of sortedMessages) {
+      const newMessageId = idMapping.get(message.messageId);
+      const newParentMessageId =
+        message.parentMessageId === Constants.NO_PARENT
+          ? Constants.NO_PARENT
+          : idMapping.get(message.parentMessageId) || Constants.NO_PARENT;
+
+      const newMessage = {
+        ...message,
+        messageId: newMessageId,
+        parentMessageId: newParentMessageId,
+        conversationId: newConversationId,
+        createdAt: message.createdAt || now.toISOString(),
+        updatedAt: message.updatedAt || now.toISOString(),
+      };
+      delete newMessage._id;
+
+      const savedMessage = await saveMessage(req, newMessage, {
+        context: 'duplicateConversation',
+      });
+      savedMessages.push(savedMessage);
+    }
+
+    logger.debug(
+      `user: ${userId} | New conversation "${originalConvo.title}" duplicated from conversation ID ${conversationId}`,
+    );
+
+    // Get the saved conversation and messages
+    const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
+    const conversation = await getConvo(userId, newConversationId, req);
+    const messages = await getMessagesFromSolid(req, newConversationId);
+
+    return {
+      conversation,
+      messages,
+    };
+  }
+
+  // For MongoDB users, use the existing bulk save approach
   const importBatchBuilder = createImportBatchBuilder(userId);
   importBatchBuilder.startConversation(originalConvo.endpoint ?? EModelEndpoint.openAI);
 
@@ -393,7 +488,7 @@ async function duplicateConversation({ userId, conversationId }) {
     `user: ${userId} | New conversation "${originalConvo.title}" duplicated from conversation ID ${conversationId}`,
   );
 
-  const conversation = await getConvo(userId, result.conversation.conversationId);
+  const conversation = await getConvo(userId, result.conversation.conversationId, req);
   const messages = await getMessages({
     user: userId,
     conversationId: conversation.conversationId,
