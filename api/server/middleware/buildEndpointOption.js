@@ -1,4 +1,4 @@
-const { handleError } = require('@librechat/api');
+const { handleError, isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const {
   EndpointURLs,
@@ -12,6 +12,7 @@ const assistants = require('~/server/services/Endpoints/assistants');
 const { getEndpointsConfig } = require('~/server/services/Config');
 const agents = require('~/server/services/Endpoints/agents');
 const { updateFilesUsage } = require('~/models');
+const USE_SOLID_STORAGE = process.env.USE_SOLID_STORAGE;
 
 const buildFunction = {
   [EModelEndpoint.agents]: agents.buildOptions,
@@ -86,6 +87,28 @@ async function buildEndpointOption(req, res, next) {
     const modelSpec = appConfig.modelSpecs.list.find((s) => s.name === parsedBody.spec);
     if (modelSpec?.iconURL) {
       parsedBody.iconURL = modelSpec.iconURL;
+    }
+  }
+
+  // If model is missing and we have a conversationId, try to load it from Solid storage
+  if (!parsedBody.model && req.body?.conversationId && 
+      req.body.conversationId !== 'new' && 
+      isEnabled(USE_SOLID_STORAGE) && 
+      req.user?.openidId) {
+    try {
+      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+      const conversation = await getConvoFromSolid(req, req.body.conversationId);
+      
+      if (conversation?.model) {
+        parsedBody.model = conversation.model;
+      }
+    } catch (error) {
+      // Don't fail the request if we can't load from Solid - just log a warning
+      logger.warn('[buildEndpointOption] Could not load conversation from Solid to extract model', {
+        conversationId: req.body.conversationId,
+        error: error.message,
+      });
+      // Continue without the model - it might be set elsewhere or the request might fail later
     }
   }
 
