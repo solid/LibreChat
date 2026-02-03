@@ -140,7 +140,7 @@ export function useTitleGeneration(enabled = true) {
  * - Shows generation indicators in conversation list
  */
 export function useActiveJobs(enabled = true) {
-  return useQuery({
+  const query = useQuery({
     queryKey: [QueryKeys.activeJobs],
     queryFn: () => dataService.getActiveJobs(),
     enabled,
@@ -150,4 +150,6 @@ export function useActiveJobs(enabled = true) {
     refetchInterval: (data) => ((data?.activeJobIds?.length ?? 0) > 0 ? 5_000 : false),
     retry: false,
   });
+  
+  return query;
 }

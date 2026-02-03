@@ -9,10 +9,37 @@ const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
  * @param {string} conversationId - The conversation's ID.
+ * @param {Object} [req] - Optional request object for Solid storage support.
  * @returns {Promise<{conversationId: string, user: string} | null>} The conversation object with selected fields or null if not found.
  */
-const searchConversation = async (conversationId) => {
+const searchConversation = async (conversationId, req = null) => {
   try {
+    // Use Solid storage if enabled and req is provided with openidId
+    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+      try {
+        const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+        const convo = await getConvoFromSolid(req, conversationId);
+        if (convo) {
+          // Return only conversationId and user to match MongoDB format
+          return {
+            conversationId: convo.conversationId,
+            user: convo.user,
+          };
+        }
+        // If Solid storage returns null, fall through to MongoDB
+        logger.debug('[searchConversation] Conversation not found in Solid Pod, falling back to MongoDB', {
+          conversationId,
+        });
+      } catch (error) {
+        logger.error('[searchConversation] Error getting conversation from Solid Pod, falling back to MongoDB', {
+          error: error.message,
+          conversationId,
+        });
+        // Fall through to MongoDB storage
+      }
+    }
+
+    // MongoDB storage (original code)
     return await Conversation.findOne({ conversationId }, 'conversationId user').lean();
   } catch (error) {
     logger.error('[searchConversation] Error searching conversation', error);

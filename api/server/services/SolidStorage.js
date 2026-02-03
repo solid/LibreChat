@@ -1229,13 +1229,40 @@ async function saveConvoToSolid(req, convoData, metadata) {
       createdAt: msg.createdAt,
     }));
 
+    // If model or endpoint are missing, try to extract them from messages
+    let finalModel = convoData.model;
+    let finalEndpoint = convoData.endpoint;
+    
+    if (!finalModel || !finalEndpoint) {
+      // Find the first message with a model (usually the AI response)
+      const messageWithModel = messages.find(msg => msg.model && msg.endpoint);
+      
+      if (messageWithModel) {
+        if (!finalModel && messageWithModel.model) {
+          logger.info('[SolidStorage] Extracting model from messages when saving', {
+            conversationId: finalConversationId,
+            extractedModel: messageWithModel.model,
+          });
+          finalModel = messageWithModel.model;
+        }
+        
+        if (!finalEndpoint && messageWithModel.endpoint) {
+          logger.info('[SolidStorage] Extracting endpoint from messages when saving', {
+            conversationId: finalConversationId,
+            extractedEndpoint: messageWithModel.endpoint,
+          });
+          finalEndpoint = messageWithModel.endpoint;
+        }
+      }
+    }
+
     // Prepare conversation object
     const conversationToSave = {
       conversationId: finalConversationId,
       user: req.user.id,
       title: convoData.title || null,
-      endpoint: convoData.endpoint || null,
-      model: convoData.model || null,
+      endpoint: finalEndpoint || null,
+      model: finalModel || null,
       agent_id: convoData.agent_id || null,
       assistant_id: convoData.assistant_id || null,
       spec: convoData.spec || null,
@@ -1390,6 +1417,40 @@ async function getConvoFromSolid(req, conversationId) {
           currentUserId: req.user.id,
         });
         return null;
+      }
+
+      // If model or endpoint are missing, try to extract them from messages
+      if (!conversationData.model || !conversationData.endpoint) {
+        try {
+          const messages = await getMessagesFromSolid(req, conversationId);
+          
+          // Find the first message with a model (usually the AI response)
+          const messageWithModel = messages.find(msg => msg.model && msg.endpoint);
+          
+          if (messageWithModel) {
+            if (!conversationData.model && messageWithModel.model) {
+              logger.info('[SolidStorage] Extracting model from messages', {
+                conversationId,
+                extractedModel: messageWithModel.model,
+              });
+              conversationData.model = messageWithModel.model;
+            }
+            
+            if (!conversationData.endpoint && messageWithModel.endpoint) {
+              logger.info('[SolidStorage] Extracting endpoint from messages', {
+                conversationId,
+                extractedEndpoint: messageWithModel.endpoint,
+              });
+              conversationData.endpoint = messageWithModel.endpoint;
+            }
+          }
+        } catch (error) {
+          // If we can't get messages, log but don't fail
+          logger.warn('[SolidStorage] Could not extract model/endpoint from messages', {
+            conversationId,
+            error: error.message,
+          });
+        }
       }
 
       logger.info('[SolidStorage] Conversation retrieved successfully', {

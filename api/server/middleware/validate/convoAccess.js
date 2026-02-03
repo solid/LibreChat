@@ -1,5 +1,6 @@
 const { isEnabled } = require('@librechat/api');
 const { Constants, ViolationTypes, Time } = require('librechat-data-provider');
+const { logger } = require('@librechat/data-schemas');
 const { searchConversation } = require('~/models/Conversation');
 const denyRequest = require('~/server/middleware/denyRequest');
 const { logViolation, getLogStores } = require('~/cache');
@@ -51,13 +52,18 @@ const validateConvoAccess = async (req, res, next) => {
       }
     }
 
-    const conversation = await searchConversation(conversationId);
+    const conversation = await searchConversation(conversationId, req);
 
     if (!conversation) {
       return next();
     }
 
     if (conversation.user !== userId) {
+      logger.error('[validateConvoAccess] Authorization failed', {
+        conversationId,
+        conversationUserId: conversation.user,
+        currentUserId: userId,
+      });
       const errorMessage = {
         type,
         error: 'User not authorized for this conversation',
@@ -74,7 +80,12 @@ const validateConvoAccess = async (req, res, next) => {
     }
     next();
   } catch (error) {
-    console.error('Error validating conversation access:', error);
+    logger.error('[validateConvoAccess] Error validating conversation access:', {
+      error: error.message,
+      stack: error.stack,
+      conversationId,
+      userId,
+    });
     res.status(500).json({ error: 'Internal server error' });
   }
 };
