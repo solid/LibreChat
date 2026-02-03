@@ -96,6 +96,15 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - `saveConvo` correctly identifies Solid users before saving to Solid Pod
   - `saveConvoToSolid` merges updates with existing conversation data to prevent data loss
 
+### 12. Conversation Management Operations
+- **Status**: Partially Complete
+- **Details**:
+  - **Rename**: Working - Users can rename conversations stored in Solid Pod
+  - **Duplicate**: Working - Users can duplicate conversations and all messages from Solid Pod
+  - **Share**: Not yet implemented
+  - **Archive**: Not yet implemented
+  - **Delete**: Not yet implemented
+
 ## Current Status
 
 ### Working Features
@@ -108,11 +117,13 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 7. **Model Persistence**: Model and endpoint information is correctly stored and retrieved
 8. **Access Control**: Conversation access validation works for Solid storage users
 9. **Title Persistence**: Conversation titles are saved to Solid Pod and persist after page refresh
+10. **Conversation Rename**: Users can rename conversations stored in Solid Pod
+11. **Conversation Duplicate**: Users can duplicate conversations and all their messages from Solid Pod
 
 ### Known Issues 🔧
 1. **Conversation Menu Options**
-   - **Issue**: Share, Rename, Duplicate, Archive, and Delete options need to be implemented for Solid storage
-   - **Impact**: Users cannot manage their conversations stored in Solid Pod
+   - **Issue**: Share, Archive, and Delete options need to be implemented for Solid storage
+   - **Impact**: Users cannot share, archive, or delete conversations stored in Solid Pod
    - **Status**: Not yet implemented
    - **Priority**: High
 
@@ -145,8 +156,6 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 
 1. **Conversation Menu Options Implementation**
    - Implement Share functionality for Solid storage conversations
-   - Implement Rename functionality (update conversation title in Solid Pod)
-   - Implement Duplicate functionality (create copy in Solid Pod)
    - Implement Archive functionality (mark as archived in Solid Pod)
    - Implement Delete functionality (remove from Solid Pod)
    - Ensure all operations work seamlessly with Solid storage backend
@@ -166,6 +175,8 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - `packages/data-provider/src/createPayload.ts` - Added normalization for Solid conversation objects and fallback handling
 - `api/models/Conversation.js` - Fixed `saveConvo` to check for Solid users before saving to Solid Pod
 - `api/server/services/SolidStorage.js` - Enhanced `saveConvoToSolid` to merge updates with existing conversation data
+- `api/server/utils/import/fork.js` - Added Solid storage support to `duplicateConversation` function
+- `api/server/routes/convos.js` - Updated duplicate endpoint to pass `req` for Solid storage support
 
 ## Dependencies Added
 - `@inrupt/solid-client@^1.30.2` - Solid Pod client library
