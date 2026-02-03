@@ -459,6 +459,7 @@ module.exports = {
    * @function
    * @param {string|ObjectId} user - The user's ID.
    * @param {Object} filter - Additional filter criteria for the conversations to be deleted.
+   * @param {Object} [req] - Optional Express request object for Solid storage support.
    * @returns {Promise<{ n: number, ok: number, deletedCount: number, messages: { n: number, ok: number, deletedCount: number } }>}
    *          An object containing the count of deleted conversations and associated messages.
    * @throws {Error} Throws an error if there's an issue with the database operations.
@@ -469,7 +470,74 @@ module.exports = {
    * const result = await deleteConvos(user, filter);
    * logger.error(result); // { n: 5, ok: 1, deletedCount: 5, messages: { n: 10, ok: 1, deletedCount: 10 } }
    */
-  deleteConvos: async (user, filter) => {
+  deleteConvos: async (user, filter, req = null) => {
+    // Use Solid storage if enabled and req is provided with openidId
+    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+      try {
+        const { deleteConvosFromSolid } = require('~/server/services/SolidStorage');
+        const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
+
+        let conversationIds = [];
+
+        // If conversationId is specified in filter, use it directly
+        if (filter.conversationId) {
+          conversationIds = [filter.conversationId];
+        } else {
+          // Otherwise, get all conversations matching the filter from Solid Pod
+          // For now, we'll get all conversations and filter in memory
+          // This is not ideal for large datasets, but Solid Pod doesn't support complex queries
+          const allConversations = await getConvosByCursorFromSolid(req, {
+            limit: 10000, // Large limit to get all conversations
+            isArchived: filter.isArchived,
+          });
+
+          // Filter conversations based on the filter criteria
+          let filteredConversations = allConversations.conversations;
+          
+          if (filter.conversationId) {
+            filteredConversations = filteredConversations.filter(
+              (c) => c.conversationId === filter.conversationId
+            );
+          }
+          
+          if (filter.endpoint) {
+            filteredConversations = filteredConversations.filter(
+              (c) => c.endpoint === filter.endpoint
+            );
+          }
+
+          conversationIds = filteredConversations.map((c) => c.conversationId);
+        }
+
+        if (!conversationIds.length) {
+          throw new Error('Conversation not found or already deleted.');
+        }
+
+        const deletedCount = await deleteConvosFromSolid(req, conversationIds);
+
+        // Return format similar to MongoDB deleteMany result
+        return {
+          n: deletedCount,
+          ok: deletedCount > 0 ? 1 : 0,
+          deletedCount,
+          messages: {
+            n: deletedCount, // Messages are deleted as part of deleteConvosFromSolid
+            ok: deletedCount > 0 ? 1 : 0,
+            deletedCount,
+          },
+        };
+      } catch (error) {
+        logger.error('[deleteConvos] Error deleting conversations from Solid Pod', {
+          error: error.message,
+          stack: error.stack,
+          filter,
+          userId: user,
+        });
+        throw error;
+      }
+    }
+
+    // MongoDB storage (original code)
     try {
       const userFilter = { ...filter, user };
       const conversations = await Conversation.find(userFilter).select('conversationId');
