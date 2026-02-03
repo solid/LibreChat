@@ -88,6 +88,14 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Model information is correctly extracted and passed through the request chain
   - All required payload fields are included for agents endpoints
 
+### 11. Title Persistence
+- **Status**: Complete
+- **Details**:
+  - Conversation titles are properly saved to Solid Pod when generated
+  - Titles persist correctly after page refresh
+  - `saveConvo` correctly identifies Solid users before saving to Solid Pod
+  - `saveConvoToSolid` merges updates with existing conversation data to prevent data loss
+
 ## Current Status
 
 ### Working Features
@@ -99,15 +107,10 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 6. **Conversation Continuation**: Users can send multiple messages in the same conversation
 7. **Model Persistence**: Model and endpoint information is correctly stored and retrieved
 8. **Access Control**: Conversation access validation works for Solid storage users
+9. **Title Persistence**: Conversation titles are saved to Solid Pod and persist after page refresh
 
 ### Known Issues 🔧
-1. **Title Retrieval on Page Refresh**
-   - **Issue**: When the page is refreshed, conversation titles revert to "untitled" instead of loading the saved title from Solid Pod
-   - **Impact**: Users lose visual context of their conversations after refresh
-   - **Status**: To be fixed
-   - **Priority**: High
-
-2. **Conversation Menu Options**
+1. **Conversation Menu Options**
    - **Issue**: Share, Rename, Duplicate, Archive, and Delete options need to be implemented for Solid storage
    - **Impact**: Users cannot manage their conversations stored in Solid Pod
    - **Status**: Not yet implemented
@@ -148,11 +151,6 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
    - Implement Delete functionality (remove from Solid Pod)
    - Ensure all operations work seamlessly with Solid storage backend
 
-2. **Fix Title Retrieval on Page Refresh**
-   - Issue: When page is refreshed, conversation titles revert to "untitled" instead of loading from Solid Pod
-   - Root Cause: Title not being properly retrieved/loaded from Solid storage on initial page load
-   - Priority: High (affects user experience)
-
 
 ## Files Modified
 - `api/server/services/SolidStorage.js` (NEW) - Core Solid Pod operations
@@ -166,11 +164,14 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - `api/server/middleware/buildEndpointOption.js` - Added model extraction from Solid storage when missing
 - `api/server/services/Endpoints/agents/initialize.js` - Enhanced model discovery from request body and endpointOption
 - `packages/data-provider/src/createPayload.ts` - Added normalization for Solid conversation objects and fallback handling
+- `api/models/Conversation.js` - Fixed `saveConvo` to check for Solid users before saving to Solid Pod
+- `api/server/services/SolidStorage.js` - Enhanced `saveConvoToSolid` to merge updates with existing conversation data
 
 ## Dependencies Added
 - `@inrupt/solid-client@^1.30.2` - Solid Pod client library
 
 ---
 
-**Report Date**: February 2, 2026  
+**Report Date**: February 3, 2026  
+
 
