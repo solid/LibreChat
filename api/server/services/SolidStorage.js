@@ -1307,6 +1307,7 @@ async function saveConvoToSolid(req, convoData, metadata) {
       presence_penalty: convoData.presence_penalty !== undefined ? (convoData.presence_penalty || null) : (baseConversation.presence_penalty || null),
       frequency_penalty: convoData.frequency_penalty !== undefined ? (convoData.frequency_penalty || null) : (baseConversation.frequency_penalty || null),
       expiredAt: convoData.expiredAt !== undefined ? (convoData.expiredAt || null) : (baseConversation.expiredAt || null),
+      isArchived: convoData.isArchived !== undefined ? (convoData.isArchived || false) : (baseConversation.isArchived || false),
       createdAt: baseConversation.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1838,6 +1839,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       assistant_id: convo.assistant_id,
       spec: convo.spec,
       iconURL: convo.iconURL,
+      isArchived: convo.isArchived || false,
     }));
 
     logger.info('[SolidStorage] Conversations retrieved successfully', {
