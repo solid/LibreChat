@@ -1,5 +1,6 @@
 const { logger } = require('@librechat/data-schemas');
 const fetch = require('node-fetch');
+const { DataFactory, Writer } = require('n3');
 const {
   getFile,
   saveFileInContainer,
@@ -7,10 +8,12 @@ const {
   deleteFile,
   getPodUrlAll,
   createContainerAt,
-  getPublicAccess,
-  setPublicAccess,
-  removePublicAccess,
 } = require('@inrupt/solid-client');
+
+// ACL/ACP namespaces
+const ACL_NS = 'http://www.w3.org/ns/auth/acl#';
+const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
 
 /**
  * Solid Storage Utility Module
@@ -1297,23 +1300,7 @@ async function saveConvoToSolid(req, convoData, metadata) {
       ...convoData,
       conversationId: finalConversationId,
       user: req.user.id,
-      // Title: use new value if provided, otherwise preserve existing, otherwise null
-      // title: convoData.title !== undefined ? (convoData.title || null) : (baseConversation.title || null),
-      // endpoint: finalEndpoint || baseConversation.endpoint || null,
-      // model: finalModel || baseConversation.model || null,
-      // agent_id: convoData.agent_id !== undefined ? (convoData.agent_id || null) : (baseConversation.agent_id || null),
-      // assistant_id: convoData.assistant_id !== undefined ? (convoData.assistant_id || null) : (baseConversation.assistant_id || null),
-      // spec: convoData.spec !== undefined ? (convoData.spec || null) : (baseConversation.spec || null),
-      // iconURL: convoData.iconURL !== undefined ? (convoData.iconURL || null) : (baseConversation.iconURL || null),
       messages: messageRefs,
-      // files: convoData.files !== undefined ? (convoData.files || []) : (baseConversation.files || []),
-      // promptPrefix: convoData.promptPrefix !== undefined ? (convoData.promptPrefix || null) : (baseConversation.promptPrefix || null),
-      // temperature: convoData.temperature !== undefined ? (convoData.temperature || null) : (baseConversation.temperature || null),
-      // topP: convoData.topP !== undefined ? (convoData.topP || null) : (baseConversation.topP || null),
-      // presence_penalty: convoData.presence_penalty !== undefined ? (convoData.presence_penalty || null) : (baseConversation.presence_penalty || null),
-      // frequency_penalty: convoData.frequency_penalty !== undefined ? (convoData.frequency_penalty || null) : (baseConversation.frequency_penalty || null),
-      // expiredAt: convoData.expiredAt !== undefined ? (convoData.expiredAt || null) : (baseConversation.expiredAt || null),
-      // isArchived: convoData.isArchived !== undefined ? (convoData.isArchived || false) : (baseConversation.isArchived || false),
       createdAt: baseConversation.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -2098,6 +2085,398 @@ async function deleteConvosFromSolid(req, conversationIds) {
 }
 
 /**
+ * Gets the ACL URL for a resource
+ * @param {string} resourceUrl - The resource URL
+ * @param {Function} fetchFn - Authenticated fetch function
+ * @returns {Promise<string>} The ACL URL
+ */
+async function getAclUrl(resourceUrl, fetchFn) {
+  try {
+    const response = await fetchFn(resourceUrl, {
+      method: 'HEAD',
+      headers: {
+        Accept: '*/*',
+      },
+    });
+    // Even if we get 403, we can still try to get the Link header
+    const linkHeader = response.headers.get('Link');
+    if (linkHeader) {
+      const aclMatch = linkHeader.match(/<([^>]+)>;\s*rel=["']acl["']/i);
+      if (aclMatch && aclMatch[1]) {
+        return aclMatch[1];
+      }
+    }
+  } catch (error) {
+    // If HEAD fails (including 403), fall back to appending .acl
+    logger.debug('[SolidStorage] Failed to discover ACL URL via Link header, using fallback', {
+      resourceUrl,
+      error: error.message,
+      errorStatus: error.status,
+    });
+  }
+  // Default: append .acl to the resource URL
+  if (resourceUrl.endsWith('/')) {
+    return resourceUrl + '.acl';
+  }
+  return resourceUrl + '.acl';
+}
+
+/**
+ * Fetches an existing ACL or returns null if it doesn't exist
+ * @param {string} aclUrl - The ACL URL
+ * @param {Function} fetchFn - Authenticated fetch function
+ * @returns {Promise<string|null>} The ACL Turtle content or null
+ */
+async function fetchAcl(aclUrl, fetchFn) {
+  try {
+    const response = await fetchFn(aclUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'text/turtle',
+      },
+    });
+    if (!response.ok) {
+      // Treat 404 and 403 as "no ACL exists" - we'll create a new one
+      if (response.status === 404 || response.status === 403) {
+        return null;
+      }
+      throw new Error(`Failed to fetch ACL: ${response.statusText}`);
+    }
+    return await response.text();
+  } catch (error) {
+    // Treat 404 and 403 as "no ACL exists"
+    if (error.status === 404 || error.status === 403 || error.message?.includes('404') || error.message?.includes('403')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Checks if public access already exists in ACL Turtle content
+ * @param {string} aclTurtle - The ACL Turtle content
+ * @returns {boolean} True if public access exists
+ */
+function hasPublicAccessInAcl(aclTurtle) {
+  return aclTurtle.includes('acl:agentClass') && aclTurtle.includes('foaf:Agent');
+}
+
+/**
+ * Creates a new ACL with public read access and owner permissions
+ * @param {string} resourceUrl - The resource URL
+ * @param {string} aclUrl - The ACL URL
+ * @param {boolean} isContainer - Whether this is a container (needs acl:default)
+ * @param {string} [ownerWebId] - Optional owner WebID to grant full permissions
+ * @returns {Promise<string>} The ACL Turtle content
+ */
+async function createPublicAcl(resourceUrl, aclUrl, isContainer = false, ownerWebId = null) {
+  const { namedNode, blankNode, quad } = DataFactory;
+  const quads = [];
+  
+  // If owner WebID is provided, create Authorization for owner with full permissions
+  if (ownerWebId) {
+    const ownerAuthNode = blankNode('ownerAuth');
+    
+    // Authorization: type
+    quads.push(quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
+    
+    // Authorization: agent (the owner)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}agent`), namedNode(ownerWebId)));
+    
+    // Authorization: accessTo (the resource)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
+    
+    // If this is a container, also add default access for resources within it
+    if (isContainer) {
+      quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
+    }
+    
+    // Authorization: mode (Write, Append, Control for owner)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Write`)));
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Append`)));
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Control`)));
+  }
+  
+  // Create Authorization for public access
+  const authNode = blankNode('publicAuth');
+  
+  // Authorization: type
+  quads.push(quad(authNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
+  
+  // Authorization: agentClass (foaf:Agent = anyone/public)
+  quads.push(quad(authNode, namedNode(`${ACL_NS}agentClass`), namedNode(`${FOAF_NS}Agent`)));
+  
+  // Authorization: accessTo (the resource)
+  quads.push(quad(authNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
+  
+  // If this is a container, also add default access for resources within it
+  if (isContainer) {
+    quads.push(quad(authNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
+  }
+  
+  // Authorization: mode (Read access)
+  quads.push(quad(authNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Read`)));
+  
+  // Convert quads to Turtle using N3 Writer
+  return new Promise((resolve, reject) => {
+    const writer = new Writer({ prefixes: { acl: ACL_NS, rdf: RDF_NS, foaf: FOAF_NS } });
+    quads.forEach((q) => writer.addQuad(q));
+    writer.end((error, result) => {
+      if (error) reject(error);
+      else resolve(result);
+    });
+  });
+}
+
+/**
+ * Updates an existing ACL by adding public read access and ensuring owner permissions
+ * @param {string} existingTurtle - The existing ACL Turtle content
+ * @param {string} aclUrl - The ACL URL
+ * @param {string} resourceUrl - The resource URL
+ * @param {boolean} isContainer - Whether this is a container (needs acl:default)
+ * @param {string} [ownerWebId] - Optional owner WebID to ensure full permissions
+ * @returns {Promise<string>} The updated ACL Turtle content
+ */
+async function updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, isContainer = false, ownerWebId = null) {
+  const { namedNode, blankNode, quad } = DataFactory;
+  const quads = [];
+  
+  // Check if owner permissions exist in the existing ACL
+  const hasOwnerPermissions = ownerWebId && existingTurtle.includes(ownerWebId);
+  
+  // If owner WebID is provided and owner permissions don't exist, add them
+  if (ownerWebId && !hasOwnerPermissions) {
+    const ownerAuthNode = blankNode('ownerAuth');
+    
+    // Authorization: type
+    quads.push(quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
+    
+    // Authorization: agent (the owner)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}agent`), namedNode(ownerWebId)));
+    
+    // Authorization: accessTo (the resource)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
+    
+    // If this is a container, also add default access for resources within it
+    if (isContainer) {
+      quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
+    }
+    
+    // Authorization: mode (Write, Append, Control for owner)
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Write`)));
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Append`)));
+    quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Control`)));
+  }
+  
+  // Check if public access already exists
+  if (hasPublicAccessInAcl(existingTurtle)) {
+    // If we added owner permissions, combine them with existing ACL
+    if (quads.length > 0) {
+      const newTurtle = await new Promise((resolve, reject) => {
+        const writer = new Writer({ prefixes: { acl: ACL_NS, rdf: RDF_NS, foaf: FOAF_NS } });
+        quads.forEach((q) => writer.addQuad(q));
+        writer.end((error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+      return existingTurtle + '\n' + newTurtle;
+    }
+    return existingTurtle; // Public access already exists, no changes needed
+  }
+  
+  // Create Authorization for public access
+  const authNode = blankNode('publicAuth');
+  quads.push(quad(authNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
+  quads.push(quad(authNode, namedNode(`${ACL_NS}agentClass`), namedNode(`${FOAF_NS}Agent`)));
+  quads.push(quad(authNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
+  
+  // If this is a container, also add default access for resources within it
+  if (isContainer) {
+    quads.push(quad(authNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
+  }
+  
+  quads.push(quad(authNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Read`)));
+  
+  // Convert new quads to Turtle
+  const newTurtle = await new Promise((resolve, reject) => {
+    const writer = new Writer({ prefixes: { acl: ACL_NS, rdf: RDF_NS, foaf: FOAF_NS } });
+    quads.forEach((q) => writer.addQuad(q));
+    writer.end((error, result) => {
+      if (error) reject(error);
+      else resolve(result);
+    });
+  });
+  
+  // Combine existing and new Turtle
+  return existingTurtle + '\n' + newTurtle;
+}
+
+/**
+ * Grants public read access to a Solid resource using manual ACL Turtle approach
+ * @param {string} resourceUrl - The resource URL
+ * @param {Function} fetchFn - Authenticated fetch function
+ * @param {boolean} isContainer - Whether this is a container (needs acl:default)
+ * @param {string} [ownerWebId] - Optional owner WebID to grant full permissions
+ * @returns {Promise<void>}
+ */
+async function grantPublicReadAccess(resourceUrl, fetchFn, isContainer = false, ownerWebId = null) {
+  // Get ACL URL - if HEAD fails with 403, we'll still try to create the ACL file
+  let aclUrl;
+  try {
+    aclUrl = await getAclUrl(resourceUrl, fetchFn);
+  } catch (error) {
+    // If HEAD fails, fall back to appending .acl
+    logger.debug('[SolidStorage] Failed to get ACL URL via HEAD, using fallback', {
+      resourceUrl,
+      error: error.message,
+    });
+    if (resourceUrl.endsWith('/')) {
+      aclUrl = resourceUrl + '.acl';
+    } else {
+      aclUrl = resourceUrl + '.acl';
+    }
+  }
+  
+  // Fetch existing ACL or create new one
+  // If we get 403, treat it as "no ACL exists" and create a new one
+  let existingTurtle = null;
+  try {
+    existingTurtle = await fetchAcl(aclUrl, fetchFn);
+  } catch (error) {
+    // If fetch fails (including 403), treat as no ACL exists
+    logger.debug('[SolidStorage] Failed to fetch existing ACL, will create new one', {
+      aclUrl,
+      error: error.message,
+    });
+    existingTurtle = null;
+  }
+  
+  let turtle;
+  
+  if (existingTurtle) {
+    // Update existing ACL with public access and ensure owner permissions
+    turtle = await updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, isContainer, ownerWebId);
+  } else {
+    // Create new ACL with public access and owner permissions
+    turtle = await createPublicAcl(resourceUrl, aclUrl, isContainer, ownerWebId);
+  }
+  
+  // Save ACL - even if we got 403 before, we should be able to PUT the ACL file
+  const response = await fetchFn(aclUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'text/turtle',
+    },
+    body: turtle,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to save ACL: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+  
+  logger.debug('[SolidStorage] ACL file created/updated successfully', {
+    aclUrl,
+    resourceUrl,
+    isContainer,
+    hasOwnerPermissions: !!ownerWebId,
+  });
+}
+
+/**
+ * Removes public read access from a Solid resource using manual ACL Turtle approach
+ * @param {string} resourceUrl - The resource URL
+ * @param {Function} fetchFn - Authenticated fetch function
+ * @returns {Promise<void>}
+ */
+async function removePublicReadAccess(resourceUrl, fetchFn) {
+  const aclUrl = await getAclUrl(resourceUrl, fetchFn);
+  
+  // Fetch existing ACL
+  const existingTurtle = await fetchAcl(aclUrl, fetchFn);
+  
+  if (!existingTurtle) {
+    // No ACL exists, nothing to remove
+    return;
+  }
+  
+  // Check if public access exists
+  if (!hasPublicAccessInAcl(existingTurtle)) {
+    // Public access doesn't exist, nothing to remove
+    return;
+  }
+  
+  // Remove public access lines from Turtle
+  // This is a simple approach - remove lines containing foaf:Agent
+  const lines = existingTurtle.split('\n');
+  const filteredLines = [];
+  let skipNext = false;
+  let inPublicAuth = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Detect start of public authorization (blank node with foaf:Agent)
+    if (line.includes('foaf:Agent') && (line.includes('acl:agentClass') || line.includes('acl:Authorization'))) {
+      inPublicAuth = true;
+      skipNext = true;
+      continue;
+    }
+    
+    // Skip lines that are part of the public authorization
+    if (inPublicAuth) {
+      if (line.trim().endsWith('.') && !line.includes('foaf:Agent')) {
+        inPublicAuth = false;
+        skipNext = false;
+      }
+      continue;
+    }
+    
+    // Skip lines that are clearly part of public auth block
+    if (skipNext && (line.includes('acl:accessTo') || line.includes('acl:mode') || line.includes('acl:Read'))) {
+      if (line.trim().endsWith('.')) {
+        skipNext = false;
+      }
+      continue;
+    }
+    
+    skipNext = false;
+    filteredLines.push(line);
+  }
+  
+  const updatedTurtle = filteredLines.join('\n');
+  
+  // Save updated ACL (or delete if empty)
+  if (updatedTurtle.trim().length === 0) {
+    // Delete ACL file if it's empty
+    try {
+      await fetchFn(aclUrl, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      logger.warn('[SolidStorage] Error deleting empty ACL', {
+        aclUrl,
+        error: error.message,
+      });
+    }
+  } else {
+    const response = await fetchFn(aclUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'text/turtle',
+      },
+      body: updatedTurtle,
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to save ACL: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+  }
+}
+
+/**
  * Set public read access for a shared conversation and its messages
  * This makes the conversation and all its messages publicly accessible
  * 
@@ -2151,10 +2530,17 @@ async function setPublicAccessForShare(req, conversationId) {
       throw new Error('No messages to share');
     }
 
-    // Set public read access on conversation file
+    // Get owner WebID for preserving owner permissions
+    const ownerWebId = req.user.openidId;
+
+    // Set public read access on conversation file using manual Turtle approach
     try {
-      const conversationFile = await getFile(conversationPath, { fetch: authenticatedFetch });
-      await setPublicAccess(conversationFile, { read: true }, { fetch: authenticatedFetch });
+      logger.debug('[SolidStorage] Setting public access on conversation file', {
+        conversationPath,
+        conversationId,
+        ownerWebId,
+      });
+      await grantPublicReadAccess(conversationPath, authenticatedFetch, false, ownerWebId);
       logger.info('[SolidStorage] Public read access set on conversation file', {
         conversationPath,
         conversationId,
@@ -2164,17 +2550,21 @@ async function setPublicAccessForShare(req, conversationId) {
         conversationPath,
         conversationId,
         error: error.message,
+        errorName: error.name,
+        errorCode: error.code,
         stack: error.stack,
       });
       throw error;
     }
 
-    // Set public read access on messages container
+    // Set public read access on messages container using manual Turtle approach
+    // IMPORTANT: For containers, we need to set acl:default so files within inherit access
+    // IMPORTANT: We must preserve owner permissions so the owner can still add messages
     const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
     try {
-      const messagesContainer = await getFile(messagesContainerPath, { fetch: authenticatedFetch });
-      await setPublicAccess(messagesContainer, { read: true }, { fetch: authenticatedFetch });
-      logger.info('[SolidStorage] Public read access set on messages container', {
+      
+      await grantPublicReadAccess(messagesContainerPath, authenticatedFetch, true, ownerWebId); // isContainer=true, ownerWebId
+      logger.info('[SolidStorage] Public read access set on messages container (with default)', {
         messagesContainerPath,
         conversationId,
       });
@@ -2188,19 +2578,52 @@ async function setPublicAccessForShare(req, conversationId) {
       // Continue with message files even if container access fails
     }
 
-    // Set public read access on each message file
+    // Set public read access on each message file using manual Turtle approach
     let messagesShared = 0;
     for (const message of messages) {
       try {
         const messagePath = getMessagePath(podUrl, conversationId, message.messageId);
-        const messageFile = await getFile(messagePath, { fetch: authenticatedFetch });
-        await setPublicAccess(messageFile, { read: true }, { fetch: authenticatedFetch });
-        messagesShared++;
+      
+        try {
+          await grantPublicReadAccess(messagePath, authenticatedFetch, false, ownerWebId);
+          messagesShared++;
+        } catch (grantError) {
+          // If grantPublicReadAccess fails, try to create ACL file directly
+          // This handles cases where we get 403 on HEAD/GET but can still PUT the ACL
+          logger.debug('[SolidStorage] grantPublicReadAccess failed, trying direct ACL creation', {
+            messagePath,
+            messageId: message.messageId,
+            error: grantError.message,
+          });
+          
+          const aclUrl = messagePath.endsWith('/') ? messagePath + '.acl' : messagePath + '.acl';
+          const turtle = await createPublicAcl(messagePath, aclUrl, false, ownerWebId);
+          
+          const response = await authenticatedFetch(aclUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'text/turtle',
+            },
+            body: turtle,
+          });
+          
+          if (response.ok) {
+            logger.info('[SolidStorage] ACL file created directly for message file', {
+              messagePath,
+              messageId: message.messageId,
+            });
+            messagesShared++;
+          } else {
+            const errorText = await response.text().catch(() => response.statusText);
+            throw new Error(`Failed to create ACL directly: ${response.status} ${response.statusText} - ${errorText}`);
+          }
+        }
       } catch (error) {
         logger.error('[SolidStorage] Error setting public access on message file', {
           messageId: message.messageId,
           conversationId,
           error: error.message,
+          errorStatus: error.status,
         });
         // Continue with other messages even if one fails
       }
@@ -2251,10 +2674,13 @@ async function removePublicAccessForShare(req, conversationId) {
     // Get conversation file path
     const conversationPath = getConversationPath(podUrl, conversationId);
 
-    // Remove public read access from conversation file
+    // Remove public read access from conversation file using manual Turtle approach
     try {
-      const conversationFile = await getFile(conversationPath, { fetch: authenticatedFetch });
-      await removePublicAccess(conversationFile, { fetch: authenticatedFetch });
+      logger.debug('[SolidStorage] Removing public access from conversation file', {
+        conversationPath,
+        conversationId,
+      });
+      await removePublicReadAccess(conversationPath, authenticatedFetch);
       logger.info('[SolidStorage] Public read access removed from conversation file', {
         conversationPath,
         conversationId,
@@ -2276,11 +2702,14 @@ async function removePublicAccessForShare(req, conversationId) {
       }
     }
 
-    // Remove public read access from messages container
+    // Remove public read access from messages container using manual Turtle approach
     const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
     try {
-      const messagesContainer = await getFile(messagesContainerPath, { fetch: authenticatedFetch });
-      await removePublicAccess(messagesContainer, { fetch: authenticatedFetch });
+      logger.debug('[SolidStorage] Removing public access from messages container', {
+        messagesContainerPath,
+        conversationId,
+      });
+      await removePublicReadAccess(messagesContainerPath, authenticatedFetch);
       logger.info('[SolidStorage] Public read access removed from messages container', {
         messagesContainerPath,
         conversationId,
@@ -2312,13 +2741,16 @@ async function removePublicAccessForShare(req, conversationId) {
       });
     }
 
-    // Remove public read access from each message file
+    // Remove public read access from each message file using manual Turtle approach
     let messagesUnshared = 0;
     for (const message of messages) {
       try {
         const messagePath = getMessagePath(podUrl, conversationId, message.messageId);
-        const messageFile = await getFile(messagePath, { fetch: authenticatedFetch });
-        await removePublicAccess(messageFile, { fetch: authenticatedFetch });
+        logger.debug('[SolidStorage] Removing public access from message file', {
+          messagePath,
+          messageId: message.messageId,
+        });
+        await removePublicReadAccess(messagePath, authenticatedFetch);
         messagesUnshared++;
       } catch (error) {
         if (error.status === 404 || error.message?.includes('404')) {

@@ -10,6 +10,7 @@ export interface ISharedLink {
   shareId?: string;
   targetMessageId?: string;
   isPublic: boolean;
+  podUrl?: string; // Pod URL for Solid storage shares
   createdAt?: Date;
   updatedAt?: Date;
 }

@@ -99,37 +99,15 @@ router.get('/link/:conversationId', requireJwtAuth, async (req, res) => {
 
 router.post('/:conversationId', requireJwtAuth, async (req, res) => {
   try {
-    logger.info('[share route] Creating shared link', {
-      userId: req.user.id,
-      conversationId: req.params.conversationId,
-      targetMessageId: req.body.targetMessageId,
-      hasOpenidId: !!req.user.openidId,
-      openidId: req.user.openidId,
-    });
     const { targetMessageId } = req.body;
     
     // Check if createSharedLink exists
     if (typeof createSharedLink !== 'function') {
-      logger.error('[share route] createSharedLink is not a function', {
-        type: typeof createSharedLink,
-        createSharedLink,
-      });
+      logger.error('[share route] createSharedLink is not a function');
       return res.status(500).json({ message: 'Share service not available' });
     }
     
-    logger.info('[share route] Calling createSharedLink', {
-      userId: req.user.id,
-      conversationId: req.params.conversationId,
-      targetMessageId,
-      hasReq: !!req,
-    });
-    
     const created = await createSharedLink(req.user.id, req.params.conversationId, targetMessageId, req);
-    
-    logger.info('[share route] createSharedLink returned', {
-      hasResult: !!created,
-      resultType: typeof created,
-    });
     
     if (created) {
       res.status(200).json(created);
@@ -137,18 +115,13 @@ router.post('/:conversationId', requireJwtAuth, async (req, res) => {
       res.status(404).end();
     }
   } catch (error) {
-    console.error('[share route] Error caught:', error);
     logger.error('Error creating shared link:', {
       error: error?.message || String(error),
       errorName: error?.name,
       errorCode: error?.code,
       stack: error?.stack,
-      errorType: typeof error,
-      errorString: String(error),
-      errorKeys: error ? Object.keys(error) : [],
       userId: req.user?.id,
       conversationId: req.params?.conversationId,
-      fullError: error,
     });
     const errorMessage = error?.message || error?.code || 'Error creating shared link';
     res.status(500).json({ message: errorMessage });
