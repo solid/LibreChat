@@ -97,13 +97,24 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - `saveConvoToSolid` merges updates with existing conversation data to prevent data loss
 
 ### 12. Conversation Management Operations
-- **Status**: Partially Complete
+- **Status**: Complete
 - **Details**:
   - **Rename**: Working - Users can rename conversations stored in Solid Pod
   - **Duplicate**: Working - Users can duplicate conversations and all messages from Solid Pod
   - **Delete**: Working - Users can delete conversations and all associated messages from Solid Pod
   - **Archive**: Working - Users can archive and unarchive conversations stored in Solid Pod
-  - **Share**: Not yet implemented
+  - **Share**: Working - Users can share conversations stored in Solid Pod with public read access while maintaining owner write permissions
+
+### 13. Share Functionality
+- **Status**: Complete
+- **Details**:
+  - Implemented public read access via ACL (Access Control List) for shared conversations
+  - Uses manual ACL Turtle format for reliable permission management
+  - Preserves owner permissions (Write, Append, Control) when granting public read access
+  - Applies `acl:default` on message containers so new messages automatically inherit public access
+  - Dynamically detects Solid users and routes to appropriate sharing method
+  - Fetches shared messages directly from Pod using unauthenticated requests
+  - Properly removes public access when share is deleted
 
 ## Current Status
 
@@ -121,13 +132,14 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 11. **Conversation Duplicate**: Users can duplicate conversations and all their messages from Solid Pod
 12. **Conversation Delete**: Users can delete conversations and all associated messages from Solid Pod
 13. **Conversation Archive**: Users can archive and unarchive conversations stored in Solid Pod
+14. **Conversation Share**: Users can share conversations stored in Solid Pod with public read access while maintaining full write permissions
 
 ### Known Issues 🔧
-1. **Conversation Menu Options**
-   - **Issue**: Share option needs to be implemented for Solid storage
-   - **Impact**: Users cannot share conversations stored in Solid Pod
-   - **Status**: Not yet implemented
+1. **Solid Authentication UI**
+   - **Issue**: Solid authentication is currently tied to the OpenID button instead of having its own dedicated button
+   - **Status**: Needs implementation
    - **Priority**: Medium
+   - **Solution**: Create a dedicated Solid login button similar to other social authentication providers (Google, GitHub, etc.)
 
 ## Technical Implementation
 
@@ -154,11 +166,24 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - Falls back to cookies if session unavailable
 - Tokens retrieved from multiple sources for robustness
 
-## Next Steps
+### Access Control (ACL)
+- Uses manual ACL Turtle format for permission management
+- Grants public read access for shared conversations while preserving owner permissions
+- Applies `acl:default` on containers to ensure new resources inherit permissions
+- Owner retains Write, Append, and Control permissions when sharing
+- Properly removes public access when share is deleted
 
-1. **Conversation Menu Options Implementation**
-   - Implement Share functionality for Solid storage conversations
-   - Ensure all operations work seamlessly with Solid storage backend
+## Future Improvements
+
+1. **User Storage Selection**
+   - Allow users to select their storage Pod (currently uses default Pod URL)
+   - Location: `api/server/services/SolidStorage.js:1619`
+   - Priority: Low (can be implemented after initial PR)
+
+2. **RDF Parsing Enhancement**
+   - Use RDF object mapper to parse Turtle format instead of regex patterns
+   - Location: `api/server/services/SolidStorage.js:1659`
+   - Priority: Low (current regex parsing works but could be more robust)
 
 
 ## Files Modified
@@ -178,12 +203,17 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - `api/server/utils/import/fork.js` - Added Solid storage support to `duplicateConversation` function
 - `api/server/routes/convos.js` - Updated duplicate and delete endpoints to pass `req` for Solid storage support
 - `api/server/services/SolidStorage.js` - Added `isArchived` field support in `saveConvoToSolid` and `getConvosByCursorFromSolid` for archive functionality
+- `api/server/services/SolidStorage.js` - Added share functionality: `setPublicAccessForShare`, `removePublicAccessForShare`, `getSharedMessagesFromSolid`, and ACL helper functions (`createPublicAcl`, `updateAclWithPublicAccess`, `grantPublicReadAccess`, `removePublicReadAccess`)
+- `packages/data-schemas/src/methods/share.ts` - Updated `createSharedLink`, `getSharedMessages`, `deleteSharedLink`, and `deleteConvoSharedLink` to support Solid storage
+- `packages/data-schemas/src/schema/share.ts` - Added `podUrl` field to `ISharedLink` schema
+- `packages/data-schemas/src/types/share.ts` - Added `podUrl` field to `ISharedLink` interface
+- `api/server/routes/share.js` - Updated share routes to pass `req` object for Solid storage support
 
 ## Dependencies Added
 - `@inrupt/solid-client@^1.30.2` - Solid Pod client library
 
 ---
 
-**Report Date**: February 3, 2026  
+**Report Date**: February 5, 2026  
 
 
