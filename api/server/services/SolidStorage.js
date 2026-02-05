@@ -1656,7 +1656,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       
       // Parse Turtle format to extract all items from ldp:contains
       // Handle both single and comma-separated items: ldp:contains <item1>, <item2>.
-      // TODO: Use object mapper to parse this.
+      // TODO: Use RDF object mapper to parse this.
       const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
       const allItems = [];
       let match;
