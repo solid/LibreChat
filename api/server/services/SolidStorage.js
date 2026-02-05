@@ -1213,6 +1213,7 @@ async function saveConvoToSolid(req, convoData, metadata) {
 
     // Get authenticated fetch and Pod URL
     const authenticatedFetch = await getSolidFetch(req);
+    // 
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
 
     // Ensure base structure exists
@@ -1289,25 +1290,27 @@ async function saveConvoToSolid(req, convoData, metadata) {
     // Merge existing conversation with updates from convoData
     // convoData takes precedence for fields that are explicitly provided
     const conversationToSave = {
+      ...baseConversation,
+      ...convoData,
       conversationId: finalConversationId,
       user: req.user.id,
       // Title: use new value if provided, otherwise preserve existing, otherwise null
-      title: convoData.title !== undefined ? (convoData.title || null) : (baseConversation.title || null),
-      endpoint: finalEndpoint || baseConversation.endpoint || null,
-      model: finalModel || baseConversation.model || null,
-      agent_id: convoData.agent_id !== undefined ? (convoData.agent_id || null) : (baseConversation.agent_id || null),
-      assistant_id: convoData.assistant_id !== undefined ? (convoData.assistant_id || null) : (baseConversation.assistant_id || null),
-      spec: convoData.spec !== undefined ? (convoData.spec || null) : (baseConversation.spec || null),
-      iconURL: convoData.iconURL !== undefined ? (convoData.iconURL || null) : (baseConversation.iconURL || null),
+      // title: convoData.title !== undefined ? (convoData.title || null) : (baseConversation.title || null),
+      // endpoint: finalEndpoint || baseConversation.endpoint || null,
+      // model: finalModel || baseConversation.model || null,
+      // agent_id: convoData.agent_id !== undefined ? (convoData.agent_id || null) : (baseConversation.agent_id || null),
+      // assistant_id: convoData.assistant_id !== undefined ? (convoData.assistant_id || null) : (baseConversation.assistant_id || null),
+      // spec: convoData.spec !== undefined ? (convoData.spec || null) : (baseConversation.spec || null),
+      // iconURL: convoData.iconURL !== undefined ? (convoData.iconURL || null) : (baseConversation.iconURL || null),
       messages: messageRefs,
-      files: convoData.files !== undefined ? (convoData.files || []) : (baseConversation.files || []),
-      promptPrefix: convoData.promptPrefix !== undefined ? (convoData.promptPrefix || null) : (baseConversation.promptPrefix || null),
-      temperature: convoData.temperature !== undefined ? (convoData.temperature || null) : (baseConversation.temperature || null),
-      topP: convoData.topP !== undefined ? (convoData.topP || null) : (baseConversation.topP || null),
-      presence_penalty: convoData.presence_penalty !== undefined ? (convoData.presence_penalty || null) : (baseConversation.presence_penalty || null),
-      frequency_penalty: convoData.frequency_penalty !== undefined ? (convoData.frequency_penalty || null) : (baseConversation.frequency_penalty || null),
-      expiredAt: convoData.expiredAt !== undefined ? (convoData.expiredAt || null) : (baseConversation.expiredAt || null),
-      isArchived: convoData.isArchived !== undefined ? (convoData.isArchived || false) : (baseConversation.isArchived || false),
+      // files: convoData.files !== undefined ? (convoData.files || []) : (baseConversation.files || []),
+      // promptPrefix: convoData.promptPrefix !== undefined ? (convoData.promptPrefix || null) : (baseConversation.promptPrefix || null),
+      // temperature: convoData.temperature !== undefined ? (convoData.temperature || null) : (baseConversation.temperature || null),
+      // topP: convoData.topP !== undefined ? (convoData.topP || null) : (baseConversation.topP || null),
+      // presence_penalty: convoData.presence_penalty !== undefined ? (convoData.presence_penalty || null) : (baseConversation.presence_penalty || null),
+      // frequency_penalty: convoData.frequency_penalty !== undefined ? (convoData.frequency_penalty || null) : (baseConversation.frequency_penalty || null),
+      // expiredAt: convoData.expiredAt !== undefined ? (convoData.expiredAt || null) : (baseConversation.expiredAt || null),
+      // isArchived: convoData.isArchived !== undefined ? (convoData.isArchived || false) : (baseConversation.isArchived || false),
       createdAt: baseConversation.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1551,6 +1554,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
 
     // Get authenticated fetch and Pod URL
     const authenticatedFetch = await getSolidFetch(req);
+    // TODO: Allow user to select their storage (can happen after the initial PR).
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
 
     // Get conversations container path
@@ -1590,6 +1594,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       
       // Parse Turtle format to extract all items from ldp:contains
       // Handle both single and comma-separated items: ldp:contains <item1>, <item2>.
+      // TODO: Use object mapper to parse this.
       const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
       const allItems = [];
       let match;
