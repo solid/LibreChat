@@ -431,26 +431,6 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
     targetMessageId?: string,
     req?: any, // Optional Express request object for Solid storage support
   ): Promise<t.CreateShareResult> {
-    // Use both console and logger to ensure we see the log
-    console.error('[createSharedLink] FUNCTION CALLED', {
-      user,
-      conversationId,
-      targetMessageId,
-      hasReq: !!req,
-      hasUser: !!req?.user,
-      userId: req?.user?.id,
-      openidId: req?.user?.openidId,
-    });
-    logger.error('[createSharedLink] FUNCTION CALLED', {
-      user,
-      conversationId,
-      targetMessageId,
-      hasReq: !!req,
-      hasUser: !!req?.user,
-      userId: req?.user?.id,
-      openidId: req?.user?.openidId,
-    });
-    
     if (!user || !conversationId) {
       throw new ShareServiceError('Missing required parameters', 'INVALID_PARAMS');
     }
@@ -462,17 +442,6 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       // Check if this is a Solid user
       const USE_SOLID_STORAGE = process.env.USE_SOLID_STORAGE;
       const isSolidUser = USE_SOLID_STORAGE && req?.user?.openidId;
-
-      logger.info('[createSharedLink] Checking user type', {
-        user,
-        conversationId,
-        USE_SOLID_STORAGE: !!USE_SOLID_STORAGE,
-        hasReq: !!req,
-        hasUser: !!req?.user,
-        hasOpenidId: !!req?.user?.openidId,
-        openidId: req?.user?.openidId,
-        isSolidUser,
-      });
 
       let conversation;
       let conversationMessages;
