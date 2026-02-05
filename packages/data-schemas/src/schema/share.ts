@@ -8,6 +8,7 @@ export interface ISharedLink extends Document {
   shareId?: string;
   targetMessageId?: string;
   isPublic: boolean;
+  podUrl?: string; // Pod URL for Solid storage shares
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -39,6 +40,10 @@ const shareSchema: Schema<ISharedLink> = new Schema(
     isPublic: {
       type: Boolean,
       default: true,
+    },
+    podUrl: {
+      type: String,
+      required: false,
     },
   },
   { timestamps: true },

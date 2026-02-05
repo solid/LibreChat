@@ -167,8 +167,8 @@ router.delete('/', async (req, res) => {
   try {
     const dbResponse = await deleteConvos(req.user.id, filter, req); // Pass req for Solid storage support
     if (filter.conversationId) {
-      await deleteToolCalls(req.user.id, filter.conversationId);
-      await deleteConvoSharedLink(req.user.id, filter.conversationId);
+          await deleteToolCalls(req.user.id, filter.conversationId);
+          await deleteConvoSharedLink(req.user.id, filter.conversationId, req);
     }
     res.status(201).json(dbResponse);
   } catch (error) {

@@ -7,6 +7,9 @@ const {
   deleteFile,
   getPodUrlAll,
   createContainerAt,
+  getPublicAccess,
+  setPublicAccess,
+  removePublicAccess,
 } = require('@inrupt/solid-client');
 
 /**
@@ -1426,12 +1429,84 @@ async function getConvoFromSolid(req, conversationId) {
       const fileText = await file.text();
       const conversationData = JSON.parse(fileText);
 
+      logger.info('[SolidStorage] Conversation file read successfully, checking user ID', {
+        conversationId,
+        conversationUserId: conversationData.user,
+        conversationUserIdType: typeof conversationData.user,
+        currentUserId: req.user.id,
+        currentUserIdType: typeof req.user.id,
+        conversationHasUser: 'user' in conversationData,
+        conversationDataKeys: Object.keys(conversationData),
+      });
+
       // Validate that this conversation belongs to the current user
-      if (conversationData.user !== req.user.id) {
-        logger.warn('[SolidStorage] Conversation belongs to different user', {
+      // Convert both to strings for comparison to handle ObjectId vs string mismatches
+      // Handle cases where user might be an ObjectId object (MongoDB) or a string
+      let conversationUserId = conversationData.user;
+      if (!conversationUserId) {
+        logger.error('[SolidStorage] Conversation has no user field - RETURNING NULL', {
           conversationId,
-          conversationUserId: conversationData.user,
-          currentUserId: req.user.id,
+          conversationDataKeys: Object.keys(conversationData),
+        });
+        return null;
+      }
+      
+      if (conversationUserId && typeof conversationUserId === 'object' && conversationUserId.toString) {
+        conversationUserId = conversationUserId.toString();
+      } else {
+        conversationUserId = String(conversationUserId || '');
+      }
+      
+      let currentUserId = req.user.id;
+      if (!currentUserId) {
+        logger.error('[SolidStorage] Request has no user ID - RETURNING NULL', {
+          conversationId,
+          hasUser: !!req.user,
+          userKeys: req.user ? Object.keys(req.user) : [],
+        });
+        return null;
+      }
+      
+      if (currentUserId && typeof currentUserId === 'object' && currentUserId.toString) {
+        currentUserId = currentUserId.toString();
+      } else {
+        currentUserId = String(currentUserId || '');
+      }
+      
+      // Trim whitespace and compare
+      conversationUserId = conversationUserId.trim();
+      currentUserId = currentUserId.trim();
+      
+      logger.info('[SolidStorage] Comparing user IDs in getConvoFromSolid', {
+        conversationId,
+        conversationUserIdRaw: conversationData.user,
+        conversationUserIdString: conversationUserId,
+        currentUserIdRaw: req.user.id,
+        currentUserIdString: currentUserId,
+        userIdType: typeof req.user.id,
+        conversationUserIdType: typeof conversationData.user,
+        userIdsMatch: conversationUserId === currentUserId,
+        conversationUserIdLength: conversationUserId.length,
+        currentUserIdLength: currentUserId.length,
+        areEqual: conversationUserId === currentUserId,
+        conversationUserIdCharCodes: conversationUserId.split('').map(c => c.charCodeAt(0)),
+        currentUserIdCharCodes: currentUserId.split('').map(c => c.charCodeAt(0)),
+      });
+      
+      if (conversationUserId !== currentUserId) {
+        logger.error('[SolidStorage] Conversation belongs to different user - RETURNING NULL', {
+          conversationId,
+          conversationUserIdRaw: conversationData.user,
+          conversationUserIdString: conversationUserId,
+          currentUserIdRaw: req.user.id,
+          currentUserIdString: currentUserId,
+          userIdType: typeof req.user.id,
+          conversationUserIdType: typeof conversationData.user,
+          conversationUserIdLength: conversationUserId.length,
+          currentUserIdLength: currentUserId.length,
+          areEqual: conversationUserId === currentUserId,
+          conversationUserIdCharCodes: conversationUserId.split('').map(c => c.charCodeAt(0)),
+          currentUserIdCharCodes: currentUserId.split('').map(c => c.charCodeAt(0)),
         });
         return null;
       }
@@ -2022,6 +2097,436 @@ async function deleteConvosFromSolid(req, conversationIds) {
   }
 }
 
+/**
+ * Set public read access for a shared conversation and its messages
+ * This makes the conversation and all its messages publicly accessible
+ * 
+ * @param {Object} req - Express request object
+ * @param {string} conversationId - The conversation ID to share
+ * @returns {Promise<void>}
+ */
+async function setPublicAccessForShare(req, conversationId) {
+  try {
+    logger.info('[SolidStorage] Setting public access for shared conversation', {
+      conversationId,
+    });
+
+    // Validate required fields
+    if (!req?.user?.id) {
+      throw new Error('User not authenticated');
+    }
+
+    if (!conversationId) {
+      throw new Error('conversationId is required');
+    }
+
+    // Get authenticated fetch and Pod URL
+    const authenticatedFetch = await getSolidFetch(req);
+    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+
+    // Get conversation file path
+    const conversationPath = getConversationPath(podUrl, conversationId);
+
+    // Verify conversation belongs to user before sharing
+    try {
+      const conversation = await getConvoFromSolid(req, conversationId);
+      if (!conversation) {
+        throw new Error('Conversation not found or does not belong to user');
+      }
+    } catch (error) {
+      logger.error('[SolidStorage] Error verifying conversation ownership before sharing', {
+        conversationId,
+        error: error.message,
+      });
+      throw error;
+    }
+
+    // Get all messages for this conversation
+    const messages = await getMessagesFromSolid(req, conversationId);
+
+    if (messages.length === 0) {
+      logger.warn('[SolidStorage] No messages found for conversation to share', {
+        conversationId,
+      });
+      throw new Error('No messages to share');
+    }
+
+    // Set public read access on conversation file
+    try {
+      const conversationFile = await getFile(conversationPath, { fetch: authenticatedFetch });
+      await setPublicAccess(conversationFile, { read: true }, { fetch: authenticatedFetch });
+      logger.info('[SolidStorage] Public read access set on conversation file', {
+        conversationPath,
+        conversationId,
+      });
+    } catch (error) {
+      logger.error('[SolidStorage] Error setting public access on conversation file', {
+        conversationPath,
+        conversationId,
+        error: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
+
+    // Set public read access on messages container
+    const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
+    try {
+      const messagesContainer = await getFile(messagesContainerPath, { fetch: authenticatedFetch });
+      await setPublicAccess(messagesContainer, { read: true }, { fetch: authenticatedFetch });
+      logger.info('[SolidStorage] Public read access set on messages container', {
+        messagesContainerPath,
+        conversationId,
+      });
+    } catch (error) {
+      logger.error('[SolidStorage] Error setting public access on messages container', {
+        messagesContainerPath,
+        conversationId,
+        error: error.message,
+        stack: error.stack,
+      });
+      // Continue with message files even if container access fails
+    }
+
+    // Set public read access on each message file
+    let messagesShared = 0;
+    for (const message of messages) {
+      try {
+        const messagePath = getMessagePath(podUrl, conversationId, message.messageId);
+        const messageFile = await getFile(messagePath, { fetch: authenticatedFetch });
+        await setPublicAccess(messageFile, { read: true }, { fetch: authenticatedFetch });
+        messagesShared++;
+      } catch (error) {
+        logger.error('[SolidStorage] Error setting public access on message file', {
+          messageId: message.messageId,
+          conversationId,
+          error: error.message,
+        });
+        // Continue with other messages even if one fails
+      }
+    }
+
+    logger.info('[SolidStorage] Public access set for shared conversation', {
+      conversationId,
+      messagesShared,
+      totalMessages: messages.length,
+    });
+  } catch (error) {
+    logger.error('[SolidStorage] Error setting public access for share', {
+      conversationId,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Remove public read access for a shared conversation and its messages
+ * This unshares the conversation and makes it private again
+ * 
+ * @param {Object} req - Express request object
+ * @param {string} conversationId - The conversation ID to unshare
+ * @returns {Promise<void>}
+ */
+async function removePublicAccessForShare(req, conversationId) {
+  try {
+    logger.info('[SolidStorage] Removing public access for shared conversation', {
+      conversationId,
+    });
+
+    // Validate required fields
+    if (!req?.user?.id) {
+      throw new Error('User not authenticated');
+    }
+
+    if (!conversationId) {
+      throw new Error('conversationId is required');
+    }
+
+    // Get authenticated fetch and Pod URL
+    const authenticatedFetch = await getSolidFetch(req);
+    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+
+    // Get conversation file path
+    const conversationPath = getConversationPath(podUrl, conversationId);
+
+    // Remove public read access from conversation file
+    try {
+      const conversationFile = await getFile(conversationPath, { fetch: authenticatedFetch });
+      await removePublicAccess(conversationFile, { fetch: authenticatedFetch });
+      logger.info('[SolidStorage] Public read access removed from conversation file', {
+        conversationPath,
+        conversationId,
+      });
+    } catch (error) {
+      if (error.status === 404 || error.message?.includes('404')) {
+        logger.debug('[SolidStorage] Conversation file not found when removing public access', {
+          conversationPath,
+          conversationId,
+        });
+      } else {
+        logger.error('[SolidStorage] Error removing public access from conversation file', {
+          conversationPath,
+          conversationId,
+          error: error.message,
+          stack: error.stack,
+        });
+        // Continue with other files even if one fails
+      }
+    }
+
+    // Remove public read access from messages container
+    const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
+    try {
+      const messagesContainer = await getFile(messagesContainerPath, { fetch: authenticatedFetch });
+      await removePublicAccess(messagesContainer, { fetch: authenticatedFetch });
+      logger.info('[SolidStorage] Public read access removed from messages container', {
+        messagesContainerPath,
+        conversationId,
+      });
+    } catch (error) {
+      if (error.status === 404 || error.message?.includes('404')) {
+        logger.debug('[SolidStorage] Messages container not found when removing public access', {
+          messagesContainerPath,
+          conversationId,
+        });
+      } else {
+        logger.error('[SolidStorage] Error removing public access from messages container', {
+          messagesContainerPath,
+          conversationId,
+          error: error.message,
+        });
+        // Continue with message files even if container access fails
+      }
+    }
+
+    // Try to get messages (they might not exist if conversation was deleted)
+    let messages = [];
+    try {
+      messages = await getMessagesFromSolid(req, conversationId);
+    } catch (error) {
+      logger.debug('[SolidStorage] Could not fetch messages when removing public access (conversation may be deleted)', {
+        conversationId,
+        error: error.message,
+      });
+    }
+
+    // Remove public read access from each message file
+    let messagesUnshared = 0;
+    for (const message of messages) {
+      try {
+        const messagePath = getMessagePath(podUrl, conversationId, message.messageId);
+        const messageFile = await getFile(messagePath, { fetch: authenticatedFetch });
+        await removePublicAccess(messageFile, { fetch: authenticatedFetch });
+        messagesUnshared++;
+      } catch (error) {
+        if (error.status === 404 || error.message?.includes('404')) {
+          logger.debug('[SolidStorage] Message file not found when removing public access', {
+            messageId: message.messageId,
+            conversationId,
+          });
+          messagesUnshared++; // Count as unshared if already deleted
+        } else {
+          logger.error('[SolidStorage] Error removing public access from message file', {
+            messageId: message.messageId,
+            conversationId,
+            error: error.message,
+          });
+          // Continue with other messages even if one fails
+        }
+      }
+    }
+
+    logger.info('[SolidStorage] Public access removed for shared conversation', {
+      conversationId,
+      messagesUnshared,
+      totalMessages: messages.length,
+    });
+  } catch (error) {
+    logger.error('[SolidStorage] Error removing public access for share', {
+      conversationId,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Get shared messages from Solid Pod using public access (no authentication required)
+ * 
+ * @param {string} shareId - The share ID
+ * @param {string} conversationId - The conversation ID (from SharedLink)
+ * @param {string} podUrl - The Pod URL where the conversation is stored
+ * @param {string} [targetMessageId] - Optional target message ID for branch sharing
+ * @returns {Promise<Object|null>} Shared conversation with messages, or null if not found
+ */
+async function getSharedMessagesFromSolid(shareId, conversationId, podUrl, targetMessageId) {
+  try {
+    logger.info('[SolidStorage] Getting shared messages from Solid Pod', {
+      shareId,
+      conversationId,
+      targetMessageId,
+    });
+
+    // Use unauthenticated fetch for public access
+    const publicFetch = fetch;
+
+    // Get conversation file path
+    const conversationPath = getConversationPath(podUrl, conversationId);
+
+    // Try to fetch conversation file with public access
+    let conversationData;
+    try {
+      const file = await getFile(conversationPath, { fetch: publicFetch });
+      const fileText = await file.text();
+      conversationData = JSON.parse(fileText);
+    } catch (error) {
+      if (error.status === 404 || error.status === 403) {
+        logger.warn('[SolidStorage] Conversation not found or not publicly accessible', {
+          conversationId,
+          shareId,
+          error: error.message,
+        });
+        return null;
+      }
+      throw error;
+    }
+
+    // Get all messages for this conversation using public access
+    const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
+    let messages = [];
+    
+    try {
+      // Try to get container contents
+      const containerResponse = await publicFetch(messagesContainerPath, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/turtle',
+        },
+      });
+
+      if (!containerResponse.ok) {
+        if (containerResponse.status === 404 || containerResponse.status === 403) {
+          logger.warn('[SolidStorage] Messages container not found or not publicly accessible', {
+            conversationId,
+            shareId,
+            status: containerResponse.status,
+          });
+          return null;
+        }
+        throw new Error(`Failed to fetch messages container: ${containerResponse.status} ${containerResponse.statusText}`);
+      }
+
+      const containerText = await containerResponse.text();
+      
+      // Parse Turtle format to extract all items from ldp:contains
+      const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
+      const allItems = [];
+      let match;
+      
+      while ((match = ldpContainsPattern.exec(containerText)) !== null) {
+        const itemsString = match[1];
+        const itemPattern = /<([^>]+)>/g;
+        let itemMatch;
+        while ((itemMatch = itemPattern.exec(itemsString)) !== null) {
+          const itemUrl = itemMatch[1];
+          const absoluteUrl = itemUrl.startsWith('http') 
+            ? itemUrl 
+            : new URL(itemUrl, messagesContainerPath).href;
+          allItems.push({ url: absoluteUrl });
+        }
+      }
+
+      // Filter for JSON files only
+      const containerContents = allItems.filter((item) => {
+        const url = item.url || '';
+        return url.endsWith('.json') && !url.endsWith('.meta.json');
+      });
+
+      // Read all message files
+      for (const item of containerContents) {
+        const url = item.url || '';
+        if (url.endsWith('.json') && !url.endsWith('.meta.json')) {
+          try {
+            const messageFile = await getFile(url, { fetch: publicFetch });
+            const messageText = await messageFile.text();
+            const messageData = JSON.parse(messageText);
+            messages.push(messageData);
+          } catch (error) {
+            logger.warn('[SolidStorage] Error reading message file from public access', {
+              messageUrl: url,
+              error: error.message,
+            });
+            // Continue with other messages
+          }
+        }
+      }
+
+      // Sort messages by createdAt
+      messages.sort((a, b) => {
+        const dateA = new Date(a.createdAt || 0);
+        const dateB = new Date(b.createdAt || 0);
+        return dateA - dateB;
+      });
+    } catch (error) {
+      logger.error('[SolidStorage] Error fetching messages from Solid Pod', {
+        conversationId,
+        shareId,
+        error: error.message,
+        stack: error.stack,
+      });
+      return null;
+    }
+
+    // Filter messages by targetMessageId if present (branch sharing)
+    let messagesToShare = messages;
+    if (targetMessageId) {
+      // Find the target message and get all messages up to it
+      const targetIndex = messages.findIndex(msg => msg.messageId === targetMessageId);
+      if (targetIndex >= 0) {
+        messagesToShare = messages.slice(0, targetIndex + 1);
+      } else {
+        logger.warn('[SolidStorage] Target message not found in shared messages', {
+          targetMessageId,
+          conversationId,
+          shareId,
+        });
+        messagesToShare = messages; // Return all messages if target not found
+      }
+    }
+
+    if (messagesToShare.length === 0) {
+      logger.warn('[SolidStorage] No messages to share', {
+        conversationId,
+        shareId,
+      });
+      return null;
+    }
+
+    // Return shared conversation data (anonymization will be done in the share methods)
+    return {
+      shareId,
+      title: conversationData.title || 'Untitled',
+      isPublic: true,
+      createdAt: conversationData.createdAt,
+      updatedAt: conversationData.updatedAt,
+      conversationId: conversationId, // Will be anonymized later
+      messages: messagesToShare, // Will be anonymized later
+      targetMessageId,
+    };
+  } catch (error) {
+    logger.error('[SolidStorage] Error getting shared messages from Solid Pod', {
+      shareId,
+      conversationId,
+      error: error.message,
+      stack: error.stack,
+    });
+    return null;
+  }
+}
+
 module.exports = {
   getSolidFetch,
   getPodUrl,
@@ -2039,6 +2544,9 @@ module.exports = {
   getConvoFromSolid,
   getConvosByCursorFromSolid,
   deleteConvosFromSolid,
+  setPublicAccessForShare,
+  removePublicAccessForShare,
+  getSharedMessagesFromSolid,
   // Re-export solid-client functions for convenience
   getFile,
   saveFileInContainer,
