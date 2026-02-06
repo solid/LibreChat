@@ -2,6 +2,7 @@ import {
   GoogleIcon,
   FacebookIcon,
   OpenIDIcon,
+  SolidIcon,
   GithubIcon,
   DiscordIcon,
   AppleIcon,
@@ -96,6 +97,23 @@ function SocialLoginRender({
         }
         label={startupConfig.openidLabel}
         id="openid"
+      />
+    ),
+    solid: startupConfig.solidLoginEnabled && (
+      <SocialButton
+        key="solid"
+        enabled={startupConfig.solidLoginEnabled}
+        serverDomain={startupConfig.serverDomain}
+        oauthPath="openid"
+        Icon={() =>
+          startupConfig.solidImageUrl ? (
+            <img src={startupConfig.solidImageUrl} alt="Solid Logo" className="h-5 w-5" />
+          ) : (
+            <SolidIcon />
+          )
+        }
+        label={startupConfig.solidLabel}
+        id="solid"
       />
     ),
     saml: startupConfig.samlLoginEnabled && (
