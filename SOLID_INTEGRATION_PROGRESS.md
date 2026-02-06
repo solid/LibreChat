@@ -13,6 +13,9 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Implemented token storage in session and cookies
   - Handled cases where Solid provider doesn't issue refresh tokens
   - Ensured JWT tokens are created for frontend authentication
+  - Added separate "Login with Solid" button with custom branding
+  - Supports both generic OpenID and Solid-specific authentication buttons
+  - Both buttons use the same authentication flow but with different labels and icons
 
 ### 2. Solid Pod Access
 - **Status**: Complete
@@ -119,27 +122,24 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 ## Current Status
 
 ### Working Features
-1. **User Login**: Solid-OIDC authentication working correctly
-2. **Conversation Creation**: New conversations are saved to Solid Pod
-3. **Message Saving**: User messages and AI responses are saved to Solid Pod
-4. **Data Retrieval**: Conversations and messages can be read from Pod
-5. **Container Structure**: Proper directory structure created automatically
-6. **Conversation Continuation**: Users can send multiple messages in the same conversation
-7. **Model Persistence**: Model and endpoint information is correctly stored and retrieved
-8. **Access Control**: Conversation access validation works for Solid storage users
-9. **Title Persistence**: Conversation titles are saved to Solid Pod and persist after page refresh
-10. **Conversation Rename**: Users can rename conversations stored in Solid Pod
-11. **Conversation Duplicate**: Users can duplicate conversations and all their messages from Solid Pod
-12. **Conversation Delete**: Users can delete conversations and all associated messages from Solid Pod
-13. **Conversation Archive**: Users can archive and unarchive conversations stored in Solid Pod
-14. **Conversation Share**: Users can share conversations stored in Solid Pod with public read access while maintaining full write permissions
+1. **User Login**: Solid-OIDC authentication working correctly with dedicated "Login with Solid" button
+2. **Separate Authentication Buttons**: Both "Login with OpenID" and "Login with Solid" buttons available with custom labels and icons
+3. **Conversation Creation**: New conversations are saved to Solid Pod
+4. **Message Saving**: User messages and AI responses are saved to Solid Pod
+5. **Data Retrieval**: Conversations and messages can be read from Pod
+6. **Container Structure**: Proper directory structure created automatically
+7. **Conversation Continuation**: Users can send multiple messages in the same conversation
+8. **Model Persistence**: Model and endpoint information is correctly stored and retrieved
+9. **Access Control**: Conversation access validation works for Solid storage users
+10. **Title Persistence**: Conversation titles are saved to Solid Pod and persist after page refresh
+11. **Conversation Rename**: Users can rename conversations stored in Solid Pod
+12. **Conversation Duplicate**: Users can duplicate conversations and all their messages from Solid Pod
+13. **Conversation Delete**: Users can delete conversations and all associated messages from Solid Pod
+14. **Conversation Archive**: Users can archive and unarchive conversations stored in Solid Pod
+15. **Conversation Share**: Users can share conversations stored in Solid Pod with public read access while maintaining full write permissions
 
 ### Known Issues 🔧
-1. **Solid Authentication UI**
-   - **Issue**: Solid authentication is currently tied to the OpenID button instead of having its own dedicated button
-   - **Status**: Needs implementation
-   - **Priority**: Medium
-   - **Solution**: Create a dedicated Solid login button similar to other social authentication providers (Google, GitHub, etc.)
+None currently identified.
 
 ## Technical Implementation
 
@@ -165,6 +165,10 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - Uses OpenID access tokens stored in session
 - Falls back to cookies if session unavailable
 - Tokens retrieved from multiple sources for robustness
+- Separate "Login with Solid" button using `SOLID_OPENID_*` environment variables
+- Generic "Login with OpenID" button using `OPENID_*` environment variables
+- Both buttons share the same authentication flow and `/oauth/openid` route
+- Custom SolidIcon component for Solid branding
 
 ### Access Control (ACL)
 - Uses manual ACL Turtle format for permission management
@@ -208,12 +212,54 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - `packages/data-schemas/src/schema/share.ts` - Added `podUrl` field to `ISharedLink` schema
 - `packages/data-schemas/src/types/share.ts` - Added `podUrl` field to `ISharedLink` interface
 - `api/server/routes/share.js` - Updated share routes to pass `req` object for Solid storage support
+- `api/strategies/SolidOpenidStrategy.js` - Updated to use `SOLID_OPENID_*` environment variables and register as 'openid' strategy
+- `api/strategies/openidStrategy.js` - Generic OpenID strategy for non-Solid OpenID providers
+- `api/strategies/index.js` - Exported both `setupSolidOpenId` and `setupOpenId` functions
+- `api/server/socialLogins.js` - Added separate configuration functions for Solid and generic OpenID strategies
+- `api/server/routes/config.js` - Added Solid-specific configuration fields (`solidLoginEnabled`, `solidLabel`, `solidImageUrl`, `solidAutoRedirect`)
+- `client/src/components/Auth/SocialLoginRender.tsx` - Added Solid button component with SolidIcon
+- `packages/client/src/svgs/SolidIcon.tsx` - New Solid icon component for authentication UI
+- `packages/client/src/svgs/index.ts` - Exported SolidIcon
+- `packages/data-provider/src/config.ts` - Added Solid configuration fields to `TStartupConfig` type
 
 ## Dependencies Added
 - `@inrupt/solid-client@^1.30.2` - Solid Pod client library
 
+## Environment Variables
+
+### Solid Authentication (SOLID_OPENID_*)
+The following environment variables are required for the "Login with Solid" button:
+
+- `SOLID_OPENID_CLIENT_ID` - OAuth client ID for Solid authentication
+- `SOLID_OPENID_CLIENT_SECRET` - OAuth client secret for Solid authentication
+- `SOLID_OPENID_ISSUER` - Solid Pod provider URL (e.g., `http://localhost:3000/`)
+- `SOLID_OPENID_SCOPE` - OAuth scopes (typically `"openid webid"`)
+- `SOLID_OPENID_SESSION_SECRET` - Secret key for session management
+- `SOLID_OPENID_CALLBACK_URL` - OAuth callback URL (typically `/oauth/openid/callback`)
+
+### Optional Solid Configuration
+- `SOLID_OPENID_BUTTON_LABEL` - Custom label for the Solid login button (default: "Continue with Solid")
+- `SOLID_OPENID_IMAGE_URL` - Custom icon URL for the Solid login button
+- `SOLID_OPENID_AUTO_REDIRECT` - Enable automatic redirect to Solid provider on login page
+
+### Generic OpenID Authentication (OPENID_*)
+The following environment variables are used for the generic "Login with OpenID" button:
+
+- `OPENID_CLIENT_ID` - OAuth client ID for generic OpenID authentication
+- `OPENID_CLIENT_SECRET` - OAuth client secret for generic OpenID authentication
+- `OPENID_ISSUER` - OpenID provider URL
+- `OPENID_SCOPE` - OAuth scopes
+- `OPENID_SESSION_SECRET` - Secret key for session management
+- `OPENID_CALLBACK_URL` - OAuth callback URL (typically `/oauth/openid/callback`)
+- `OPENID_BUTTON_LABEL` - Custom label for the OpenID login button (default: "Continue with OpenID")
+- `OPENID_IMAGE_URL` - Custom icon URL for the OpenID login button
+- `OPENID_AUTO_REDIRECT` - Enable automatic redirect to OpenID provider on login page
+
+### Solid Storage
+- `USE_SOLID_STORAGE` - Enable Solid Pod storage for conversations and messages (set to `true` to enable)
+
 ---
 
-**Report Date**: February 5, 2026  
+**Report Date**: February 6, 2026
 
 
