@@ -8,6 +8,7 @@ const {
   facebookLogin,
   discordLogin,
   setupSolidOpenId,
+  setupOpenId,
   googleLogin,
   githubLogin,
   appleLogin,
@@ -15,16 +16,74 @@ const {
 } = require('~/strategies');
 const { getLogStores } = require('~/cache');
 
+
 /**
- * Configures OpenID Connect for the application.
+ * Configures Solid OpenID Connect for the application.
+ * @param {Express.Application} app - The Express application instance.
+ * @returns {Promise<void>}
+ */
+async function configureSolidOpenId(app) {
+  logger.info('Configuring Solid OpenID Connect...');
+  const sessionOptions = {
+    secret: process.env.SOLID_OPENID_SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: getLogStores(CacheKeys.OPENID_SESSION),
+  };
+  app.use(session(sessionOptions));
+  app.use(passport.session());
+
+  const config = await setupSolidOpenId();
+  if (!config) {
+    logger.error('Solid OpenID Connect configuration failed - strategy not registered.');
+    return;
+  }
+
+  if (isEnabled(process.env.OPENID_REUSE_TOKENS)) {
+    logger.info('Solid OpenID token reuse is enabled.');
+    passport.use('solidJwt', openIdJwtLogin(config));
+  }
+  logger.info('Solid OpenID Connect configured successfully.');
+}
+
+/**
+* Configures Solid OpenID Connect for the application.
+ * @param {Express.Application} app - The Express application instance.
+ * @returns {Promise<void>}
+ */
+async function configureSolidOpenId(app) {
+  logger.info('Configuring Solid OpenID Connect...');
+  const sessionOptions = {
+    secret: process.env.SOLID_OPENID_SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: getLogStores(CacheKeys.OPENID_SESSION),
+  };
+  app.use(session(sessionOptions));
+  app.use(passport.session());
+
+  const config = await setupSolidOpenId();
+  if (!config) {
+    logger.error('Solid OpenID Connect configuration failed - strategy not registered.');
+    return;
+  }
+
+  if (isEnabled(process.env.OPENID_REUSE_TOKENS)) {
+    logger.info('Solid OpenID token reuse is enabled.');
+    passport.use('solidJwt', openIdJwtLogin(config));
+  }
+  logger.info('Solid OpenID Connect configured successfully.');
+}
+
+/**
+ * Configures generic OpenID Connect for the application.
  * @param {Express.Application} app - The Express application instance.
  * @returns {Promise<void>}
  */
 async function configureOpenId(app) {
   logger.info('Configuring OpenID Connect...');
-  const sessionExpiry = Number(process.env.SESSION_EXPIRY) || DEFAULT_SESSION_EXPIRY;
   const sessionOptions = {
-    secret: process.env.OPENID_SESSION_SECRET,
+    secret: process.env.SOLID_OPENID_SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     store: getLogStores(CacheKeys.OPENID_SESSION),
@@ -36,7 +95,7 @@ async function configureOpenId(app) {
   app.use(session(sessionOptions));
   app.use(passport.session());
 
-  const config = await setupSolidOpenId();
+  const config = await setupOpenId();
   if (!config) {
     logger.error('OpenID Connect configuration failed - strategy not registered.');
     return;
@@ -71,6 +130,16 @@ const configureSocialLogins = async (app) => {
   if (process.env.APPLE_CLIENT_ID && process.env.APPLE_PRIVATE_KEY_PATH) {
     passport.use(appleLogin());
   }
+  // Configure Solid OpenID if SOLID_OPENID_* env vars are present
+  if (
+    process.env.SOLID_OPENID_CLIENT_ID &&
+    process.env.SOLID_OPENID_ISSUER &&
+    process.env.SOLID_OPENID_SCOPE &&
+    process.env.SOLID_OPENID_SESSION_SECRET
+  ) {
+    await configureSolidOpenId(app);
+  }
+  // Configure generic OpenID if OPENID_* env vars are present
   if (
     process.env.OPENID_CLIENT_ID &&
     process.env.OPENID_ISSUER &&

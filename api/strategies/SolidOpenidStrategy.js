@@ -303,8 +303,8 @@ async function setupSolidOpenId() {
 
     /** @type {ClientMetadata} */
     const clientMetadata = {
-      client_id: process.env.OPENID_CLIENT_ID,
-      client_secret: process.env.OPENID_CLIENT_SECRET,
+      client_id: process.env.SOLID_OPENID_CLIENT_ID,
+      client_secret: process.env.SOLID_OPENID_CLIENT_SECRET,
     };
 
     if (shouldGenerateNonce) {
@@ -315,8 +315,8 @@ async function setupSolidOpenId() {
 
     /** @type {Configuration} */
     openidConfig = await client.discovery(
-      new URL(process.env.OPENID_ISSUER),
-      process.env.OPENID_CLIENT_ID,
+      new URL(process.env.SOLID_OPENID_ISSUER),
+      process.env.SOLID_OPENID_CLIENT_ID,
       clientMetadata,
       undefined,
       {
@@ -345,8 +345,8 @@ async function setupSolidOpenId() {
     const openidLogin = new CustomOpenIDStrategy(
       {
         config: openidConfig,
-        scope: process.env.OPENID_SCOPE,
-        callbackURL: process.env.DOMAIN_SERVER + process.env.OPENID_CALLBACK_URL,
+        scope: process.env.SOLID_OPENID_SCOPE,
+        callbackURL: process.env.DOMAIN_SERVER + process.env.SOLID_OPENID_CALLBACK_URL,
         clockTolerance: process.env.OPENID_CLOCK_TOLERANCE || 300,
         usePKCE,
       },

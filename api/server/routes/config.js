@@ -49,6 +49,11 @@ router.get('/', async function (req, res) {
       !!process.env.OPENID_ISSUER &&
       !!process.env.OPENID_SESSION_SECRET;
 
+    const isSolidEnabled =
+      !!process.env.SOLID_OPENID_CLIENT_ID &&
+      !!process.env.SOLID_OPENID_ISSUER &&
+      !!process.env.SOLID_OPENID_SESSION_SECRET;
+
     const isSamlEnabled =
       !!process.env.SAML_ENTRY_POINT &&
       !!process.env.SAML_ISSUER &&
@@ -71,10 +76,15 @@ router.get('/', async function (req, res) {
         !!process.env.APPLE_TEAM_ID &&
         !!process.env.APPLE_KEY_ID &&
         !!process.env.APPLE_PRIVATE_KEY_PATH,
-      openidLoginEnabled: isOpenIdEnabled,
+      // If Solid is enabled but OpenID is not, still show OpenID button since they use the same strategy
+      openidLoginEnabled: isOpenIdEnabled || isSolidEnabled,
       openidLabel: process.env.OPENID_BUTTON_LABEL || 'Continue with OpenID',
       openidImageUrl: process.env.OPENID_IMAGE_URL,
       openidAutoRedirect: isEnabled(process.env.OPENID_AUTO_REDIRECT),
+      solidLoginEnabled: isSolidEnabled,
+      solidLabel: process.env.SOLID_OPENID_BUTTON_LABEL || 'Continue with Solid',
+      solidImageUrl: process.env.SOLID_OPENID_IMAGE_URL,
+      solidAutoRedirect: isEnabled(process.env.SOLID_OPENID_AUTO_REDIRECT),
       samlLoginEnabled: !isOpenIdEnabled && isSamlEnabled,
       samlLabel: process.env.SAML_BUTTON_LABEL,
       samlImageUrl: process.env.SAML_IMAGE_URL,
