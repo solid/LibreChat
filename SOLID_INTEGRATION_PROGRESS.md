@@ -63,15 +63,20 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Storage backend is determined by how the user logged in: **"Continue with Solid"** → Solid Pod; **"Continue with OpenID"** or other → MongoDB
   - Users who click "Continue with Solid" have `provider === 'solid'`; only those get Solid storage
   - Integrated Solid storage in `Message.js`, `Conversation.js`, routes, and share methods
+  - Shared `isSolidUser(req)` helper in `api/server/utils/isSolidUser.js` used everywhere (DRY)
   - Maintains backward compatibility with MongoDB for all non-Solid users
 
-### 8. Conversation Access Validation
+### 8. Conversation Access Validation & No MongoDB Fallback for Solid Users
 - **Status**: Complete
 - **Details**:
   - Updated `validateConvoAccess` middleware to check Solid storage
   - Modified `searchConversation` to query Solid Pod when the user logged in via "Continue with Solid" (`provider === 'solid'`)
   - Ensures users can only access their own conversations from Solid Pod
-  - Maintains MongoDB fallback for non-Solid users
+  - **No MongoDB fallback for Solid users (per PR review)**: When a user is logged in with Solid, we never fall back to MongoDB on Solid failure or null. Errors are surfaced so the UI can show "Save failed" or "Load failed" instead of writing/reading from the wrong store:
+    - **Conversation.js**: `searchConversation`, `getConvo`, `saveConvo`, `getConvosByCursor` return null or rethrow for Solid users; no MongoDB path
+    - **validateMessageReq.js**: Solid users get 404 if conversation not in Solid; no MongoDB lookup
+    - **messages.js** routes: Solid errors return 503 with "Solid storage temporarily unavailable"; no MongoDB read
+  - Non-Solid users continue to use MongoDB only
 
 ### 9. Payload Normalization & Model Extraction
 - **Status**: Complete
@@ -192,14 +197,17 @@ None currently identified.
 
 ## Files Modified
 - `api/server/services/SolidStorage.js` (NEW) - Core Solid Pod operations
-- `api/models/Message.js` - Integrated Solid storage
-- `api/models/Conversation.js` - Integrated Solid storage, updated `searchConversation` for Solid support
+- `api/server/utils/isSolidUser.js` (NEW) - Shared helper to detect Solid login (`provider === 'solid'`), used across models, routes, and middleware (DRY)
+- `api/models/Message.js` - Integrated Solid storage; MongoDB path for non-Solid users only (no fallback for Solid)
+- `api/models/Conversation.js` - Integrated Solid storage; no MongoDB fallback for Solid users (return null/rethrow on Solid failure)
 - `api/server/routes/oauth.js` - Token logging and storage
 - `api/server/services/AuthService.js` - Token management
 - `api/server/index.js` - Session middleware ordering
 - `api/server/controllers/AuthController.js` - Refresh token handling
 - `api/server/middleware/validate/convoAccess.js` - Added Solid storage support for conversation access validation
-- `api/server/middleware/buildEndpointOption.js` - Added model extraction from Solid storage when missing
+- `api/server/middleware/buildEndpointOption.js` - Added model extraction from Solid storage when missing; uses shared `isSolidUser`
+- `api/server/middleware/validateMessageReq.js` - Solid storage validation; no MongoDB fallback for Solid users (404 on Solid failure)
+- `api/server/routes/messages.js` - Solid message reads return 503 on Solid failure (no MongoDB fallback)
 - `api/server/services/Endpoints/agents/initialize.js` - Enhanced model discovery from request body and endpointOption
 - `packages/data-provider/src/createPayload.ts` - Added normalization for Solid conversation objects and fallback handling
 - `api/models/Conversation.js` - Fixed `saveConvo` to check for Solid users before saving to Solid Pod, added Solid storage support to `deleteConvos`
