@@ -216,7 +216,7 @@ None currently identified.
 - `api/server/routes/convos.js` - Updated duplicate and delete endpoints to pass `req` for Solid storage support
 - `api/server/services/SolidStorage.js` - Added `isArchived` field support in `saveConvoToSolid` and `getConvosByCursorFromSolid` for archive functionality
 - `api/server/services/SolidStorage.js` - Added share functionality: `setPublicAccessForShare`, `removePublicAccessForShare`, `getSharedMessagesFromSolid`, and ACL helper functions (`createPublicAcl`, `updateAclWithPublicAccess`, `grantPublicReadAccess`, `removePublicReadAccess`)
-- `packages/data-schemas/src/methods/share.ts` - Updated `createSharedLink`, `getSharedMessages`, `deleteSharedLink`, and `deleteConvoSharedLink` to support Solid storage
+- `packages/data-schemas/src/methods/share.ts` - Updated `createSharedLink`, `getSharedMessages`, `deleteSharedLink`, and `deleteConvoSharedLink` to support Solid storage; uses inline require() for SolidStorage/isSolidUser to avoid circular dependency with data-schemas
 - `packages/data-schemas/src/schema/share.ts` - Added `podUrl` field to `ISharedLink` schema
 - `packages/data-schemas/src/types/share.ts` - Added `podUrl` field to `ISharedLink` interface
 - `api/server/routes/share.js` - Updated share routes to pass `req` object for Solid storage support
@@ -265,6 +265,10 @@ The following environment variables are used for the generic "Login with OpenID"
 
 ### Solid Storage
 - Storage is chosen per user: **Solid Pod** for users who logged in with "Continue with Solid" (`provider === 'solid'`); **MongoDB** for everyone else. No environment variable is required.
+
+### Imports (top-level vs inline)
+- **API code** (Conversation.js, Message.js, buildEndpointOption.js, validateMessageReq.js, messages.js, convos.js, fork.js): SolidStorage and isSolidUser are required at **top level** for clarity and tooling (per PR review).
+- **packages/data-schemas share.ts**: SolidStorage and isSolidUser use **inline** `require()` inside the functions that need them, to avoid a circular dependency (data-schemas ← SolidStorage ← data-schemas for `logger`). Top-level require there caused `logger` to be undefined at load time and backend crash.
 
 ---
 
