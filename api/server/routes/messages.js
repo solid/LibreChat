@@ -42,21 +42,18 @@ router.get('/', async (req, res) => {
     const sortOrder = sortDirection === 'asc' ? 1 : -1;
 
     if (conversationId && messageId) {
-      // Use Solid storage when user logged in via "Continue with Solid"
+     
       if (isSolidUser(req)) {
         try {
           const allMessages = await getMessagesFromSolid(req, conversationId);
           const message = allMessages.find(m => m.messageId === messageId);
           response = { messages: message ? [message] : [], nextCursor: null };
         } catch (error) {
-          logger.error('Error getting message from Solid Pod, falling back to MongoDB', error);
-          // Fallback to MongoDB
-          const message = await Message.findOne({
-            conversationId,
-            messageId,
-            user: user,
-          }).lean();
-          response = { messages: message ? [message] : [], nextCursor: null };
+          logger.error('Error getting message from Solid Pod', error);
+          return res.status(503).json({
+            error: 'Failed to load from Solid Pod',
+            message: 'Solid storage is temporarily unavailable. Please try again.',
+          });
         }
       } else {
         // MongoDB storage
@@ -99,26 +96,13 @@ router.get('/', async (req, res) => {
           }
           response = { messages, nextCursor };
         } catch (error) {
-          logger.error('Error getting messages from Solid Pod, falling back to MongoDB', error);
-          // Fallback to MongoDB
-          const filter = { conversationId, user: user };
-          if (cursor) {
-            filter[sortField] = sortOrder === 1 ? { $gt: cursor } : { $lt: cursor };
-          }
-          const messages = await Message.find(filter)
-            .sort({ [sortField]: sortOrder })
-            .limit(pageSize + 1)
-            .lean();
-          let nextCursor = null;
-          if (messages.length > pageSize) {
-            messages.pop(); // Remove extra item used to detect next page
-            // Create cursor from the last RETURNED item (not the popped one)
-            nextCursor = messages[messages.length - 1][sortField];
-          }
-          response = { messages, nextCursor };
+          logger.error('Error getting messages from Solid Pod', error);
+          return res.status(503).json({
+            error: 'Failed to load from Solid Pod',
+            message: 'Solid storage is temporarily unavailable. Please try again.',
+          });
         }
       } else {
-        // MongoDB storage
         const filter = { conversationId, user: user };
         if (cursor) {
           filter[sortField] = sortOrder === 1 ? { $gt: cursor } : { $lt: cursor };
@@ -357,27 +341,25 @@ router.get('/:conversationId', validateMessageReq, async (req, res) => {
   try {
     const { conversationId } = req.params;
     
-    // Use Solid storage when user logged in via "Continue with Solid"
+
     if (isSolidUser(req)) {
       try {
         const messages = await getMessagesFromSolid(req, conversationId);
-        // Remove internal fields for response
         const cleanedMessages = messages.map(msg => {
           const { _id, __v, user, ...rest } = msg;
           return rest;
         });
-        res.status(200).json(cleanedMessages);
+        return res.status(200).json(cleanedMessages);
       } catch (error) {
-        logger.error('Error getting messages from Solid Pod, falling back to MongoDB', error);
-        // Fallback to MongoDB
-        const messages = await getMessages({ conversationId }, '-_id -__v -user');
-        res.status(200).json(messages);
+        logger.error('Error getting messages from Solid Pod', error);
+        return res.status(503).json({
+          error: 'Failed to load from Solid Pod',
+          message: 'Solid storage is temporarily unavailable. Please try again.',
+        });
       }
-    } else {
-      // MongoDB storage
-      const messages = await getMessages({ conversationId }, '-_id -__v -user');
-      res.status(200).json(messages);
     }
+    const messages = await getMessages({ conversationId }, '-_id -__v -user');
+    res.status(200).json(messages);
   } catch (error) {
     logger.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Internal server error' });

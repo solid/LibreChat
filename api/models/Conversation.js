@@ -12,32 +12,19 @@ const { isSolidUser } = require('~/server/utils/isSolidUser');
  */
 const searchConversation = async (conversationId, req = null) => {
   try {
-    // Use Solid storage when user logged in via "Continue with Solid"
+    // Solid users: use Solid storage only; no MongoDB fallback 
     if (isSolidUser(req)) {
-      try {
-        const { getConvoFromSolid } = require('~/server/services/SolidStorage');
-        const convo = await getConvoFromSolid(req, conversationId);
-        if (convo) {
-          // Return only conversationId and user to match MongoDB format
-          return {
-            conversationId: convo.conversationId,
-            user: convo.user,
-          };
-        }
-        // If Solid storage returns null, fall through to MongoDB
-        logger.debug('[searchConversation] Conversation not found in Solid Pod, falling back to MongoDB', {
-          conversationId,
-        });
-      } catch (error) {
-        logger.error('[searchConversation] Error getting conversation from Solid Pod, falling back to MongoDB', {
-          error: error.message,
-          conversationId,
-        });
-        // Fall through to MongoDB storage
+      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+      const convo = await getConvoFromSolid(req, conversationId);
+      if (convo) {
+        return {
+          conversationId: convo.conversationId,
+          user: convo.user,
+        };
       }
+      return null;
     }
 
-    // MongoDB storage (original code)
     return await Conversation.findOne({ conversationId }, 'conversationId user').lean();
   } catch (error) {
     logger.error('[searchConversation] Error searching conversation', error);
@@ -53,30 +40,13 @@ const searchConversation = async (conversationId, req = null) => {
  * @returns {Promise<TConversation>} The conversation object.
  */
 const getConvo = async (user, conversationId, req = null) => {
-  // Use Solid storage when user logged in via "Continue with Solid"
+  // Solid users: use Solid storage only; no MongoDB fallback 
   if (isSolidUser(req)) {
-    try {
-      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
-      const convo = await getConvoFromSolid(req, conversationId);
-      if (convo) {
-        return convo;
-      }
-      // If Solid storage returns null, fall through to MongoDB
-      logger.warn('[getConvo] Conversation not found in Solid Pod, falling back to MongoDB', {
-        conversationId,
-        userId: user,
-      });
-    } catch (error) {
-      logger.error('[getConvo] Error getting conversation from Solid Pod, falling back to MongoDB', {
-        error: error.message,
-        conversationId,
-        userId: user,
-      });
-      // Fall through to MongoDB storage
-    }
+    const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+    const convo = await getConvoFromSolid(req, conversationId);
+    return convo ?? null;
   }
 
-  // MongoDB storage (original code)
   try {
     return await Conversation.findOne({ user, conversationId }).lean();
   } catch (error) {
@@ -175,15 +145,12 @@ module.exports = {
         if (metadata && metadata?.context) {
           logger.info(`[saveConvo] ${metadata.context}`);
         }
-        // Fall through to MongoDB if Solid save fails
-        logger.warn('[saveConvo] Falling back to MongoDB after Solid save failure', {
-          conversationId,
-          error: error.message,
-        });
+        // Solid users: surface error so UI can show "Save failed"
+        throw error;
       }
     }
 
-    // MongoDB storage (original code)
+    // MongoDB storage
     try {
       if (metadata?.context) {
         logger.debug(`[saveConvo] ${metadata.context}`);
@@ -270,27 +237,18 @@ module.exports = {
       req, // Optional req object for Solid storage
     } = {},
   ) => {
-    // Use Solid storage when user logged in via "Continue with Solid"
+
     if (isSolidUser(req)) {
-      try {
-        const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
-        return await getConvosByCursorFromSolid(req, {
-          cursor,
-          limit,
-          isArchived,
-          tags,
-          search,
-          sortBy,
-          sortDirection,
-        });
-      } catch (error) {
-        logger.warn('[getConvosByCursor] Error getting conversations from Solid Pod, falling back to MongoDB', {
-          error: error.message,
-          user: req.user?.id,
-          hasOpenidId: !!req.user?.openidId,
-        });
-        // Fall through to MongoDB storage
-      }
+      const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
+      return await getConvosByCursorFromSolid(req, {
+        cursor,
+        limit,
+        isArchived,
+        tags,
+        search,
+        sortBy,
+        sortDirection,
+      });
     }
     const filters = [{ user }];
     if (isArchived) {

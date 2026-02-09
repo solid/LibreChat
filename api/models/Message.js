@@ -89,7 +89,7 @@ async function saveMessage(req, params, metadata) {
   }
 
   
-  // Fallback to MongoDB if Solid is not enabled
+  // MongoDB path for non-Solid users
   try {
     const update = {
       ...params,
