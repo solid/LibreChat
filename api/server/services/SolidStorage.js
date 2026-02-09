@@ -1722,7 +1722,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       }
       
       // Log unexpected errors but don't throw - return empty array instead
-      // This prevents fallback to MongoDB when Solid storage is enabled
+      // This prevents fallback to MongoDB when user is logged in via "Continue with Solid"
       logger.warn('[SolidStorage] Unexpected error getting container contents, returning empty array', {
         conversationsContainerPath,
         errorMessage,

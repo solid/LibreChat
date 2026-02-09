@@ -1,3 +1,4 @@
+const { logger } = require('@librechat/data-schemas');
 const { getConvo } = require('~/models');
 const { getConvoFromSolid } = require('~/server/services/SolidStorage');
 const { isSolidUser } = require('~/server/utils/isSolidUser');
@@ -16,23 +17,24 @@ const validateMessageReq = async (req, res, next) => {
 
   let conversation = null;
 
-  // Use Solid storage when user logged in via "Continue with Solid"
+  // Solid users: use Solid storage only; no MongoDB fallback
   if (isSolidUser(req)) {
     try {
       conversation = await getConvoFromSolid(req, conversationId);
     } catch (error) {
-      // If Solid storage fails, fall back to MongoDB
-      // Don't log error here as it might be expected (conversation doesn't exist in Solid yet)
+      logger.error('[validateMessageReq] Error loading conversation from Solid Pod', {
+        conversationId,
+        error: error.message,
+      });
     }
-  }
-
-  // Fallback to MongoDB if Solid storage is disabled or didn't find the conversation
-  if (!conversation) {
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+  } else {
     conversation = await getConvo(req.user.id, conversationId);
-  }
-
-  if (!conversation) {
-    return res.status(404).json({ error: 'Conversation not found' });
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
   }
 
   if (conversation.user !== req.user.id) {
