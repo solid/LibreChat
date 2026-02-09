@@ -57,19 +57,19 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Properly parses Turtle format to extract `ldp:contains` items
   - Handles empty containers gracefully (returns empty arrays, not errors)
 
-### 7. Feature Flag Implementation
+### 7. Storage Backend Selection (No Feature Flag)
 - **Status**: Complete
 - **Details**:
-  - Added `USE_SOLID_STORAGE` environment variable
-  - Integrated Solid storage functions into `Message.js` and `Conversation.js` models
-  - Maintains backward compatibility with MongoDB
-  - Original MongoDB code preserved (commented) for rollback capability
+  - Storage backend is determined by how the user logged in: **"Continue with Solid"** → Solid Pod; **"Continue with OpenID"** or other → MongoDB
+  - Users who click "Continue with Solid" have `provider === 'solid'`; only those get Solid storage
+  - Integrated Solid storage in `Message.js`, `Conversation.js`, routes, and share methods
+  - Maintains backward compatibility with MongoDB for all non-Solid users
 
 ### 8. Conversation Access Validation
 - **Status**: Complete
 - **Details**:
   - Updated `validateConvoAccess` middleware to check Solid storage
-  - Modified `searchConversation` to query Solid Pod when `USE_SOLID_STORAGE` is enabled
+  - Modified `searchConversation` to query Solid Pod when the user logged in via "Continue with Solid" (`provider === 'solid'`)
   - Ensures users can only access their own conversations from Solid Pod
   - Maintains MongoDB fallback for non-Solid users
 
@@ -256,10 +256,10 @@ The following environment variables are used for the generic "Login with OpenID"
 - `OPENID_AUTO_REDIRECT` - Enable automatic redirect to OpenID provider on login page
 
 ### Solid Storage
-- `USE_SOLID_STORAGE` - Enable Solid Pod storage for conversations and messages (set to `true` to enable)
+- Storage is chosen per user: **Solid Pod** for users who logged in with "Continue with Solid" (`provider === 'solid'`); **MongoDB** for everyone else. No environment variable is required.
 
 ---
 
-**Report Date**: February 6, 2026
+**Report Date**: February 11, 2026
 
 

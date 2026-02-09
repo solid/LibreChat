@@ -361,10 +361,10 @@ function splitAtTargetLevel(messages, targetMessageId) {
  * @param {object} [params.req] - Optional Express request object for Solid storage support.
  * @returns {Promise<{ conversation: TConversation, messages: TMessage[] }>} The duplicated conversation and messages.
  */
+const { isSolidUser } = require('~/server/utils/isSolidUser');
+
 async function duplicateConversation({ userId, conversationId, req }) {
-  const { isEnabled } = require('@librechat/api');
-  const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
-  const isSolidUser = USE_SOLID_STORAGE && req && req.user?.openidId;
+  const useSolidStorage = isSolidUser(req);
 
   // Get original conversation
   const originalConvo = await getConvo(userId, conversationId, req);
@@ -374,7 +374,7 @@ async function duplicateConversation({ userId, conversationId, req }) {
 
   // Get original messages
   let originalMessages;
-  if (isSolidUser) {
+  if (useSolidStorage) {
     const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
     originalMessages = await getMessagesFromSolid(req, conversationId);
   } else {
@@ -394,7 +394,7 @@ async function duplicateConversation({ userId, conversationId, req }) {
   );
 
   // For Solid users, save individually to support Solid storage
-  if (isSolidUser) {
+  if (useSolidStorage) {
     const { saveConvo } = require('~/models/Conversation');
     const { saveMessage } = require('~/models/Message');
     const { v4: uuidv4 } = require('uuid');

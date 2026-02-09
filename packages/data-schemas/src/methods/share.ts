@@ -378,12 +378,10 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       // Find all shares for this conversation to check if any are Solid shares
       const shares = await SharedLink.find({ user, conversationId }).lean();
       
-      // If any shares are Solid shares, remove public access
+      // If any shares are Solid shares, remove public access (user logged in via "Continue with Solid")
       if (req) {
-        const USE_SOLID_STORAGE = process.env.USE_SOLID_STORAGE;
-        const isSolidUser = USE_SOLID_STORAGE && req?.user?.openidId;
-        
-        if (isSolidUser) {
+        const { isSolidUser } = require('~/server/utils/isSolidUser');
+        if (isSolidUser(req)) {
           const solidShares = shares.filter(share => share.podUrl);
           for (const share of solidShares) {
             try {
@@ -439,15 +437,14 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       const SharedLink = mongoose.models.SharedLink as Model<t.ISharedLink>;
       const Conversation = mongoose.models.Conversation as SchemaWithMeiliMethods;
 
-      // Check if this is a Solid user
-      const USE_SOLID_STORAGE = process.env.USE_SOLID_STORAGE;
-      const isSolidUser = USE_SOLID_STORAGE && req?.user?.openidId;
+      // Check if this is a Solid user (logged in via "Continue with Solid")
+      const { isSolidUser } = require('~/server/utils/isSolidUser');
 
       let conversation;
       let conversationMessages;
       let podUrl: string | undefined;
 
-      if (isSolidUser) {
+      if (isSolidUser(req)) {
         logger.info('[createSharedLink] Detected Solid user, using Solid storage path');
         // Check for existing share first (same as MongoDB)
         const existingShare = (await SharedLink.findOne({

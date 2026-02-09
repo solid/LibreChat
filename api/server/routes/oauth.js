@@ -37,7 +37,7 @@ const oauthHandler = async (req, res, next) => {
     }
     if (
       req.user &&
-      req.user.provider == 'openid' &&
+      (req.user.provider === 'openid' || req.user.provider === 'solid') &&
       // isEnabled(process.env.OPENID_REUSE_TOKENS) === true
       req.user.tokenset &&
       req.user.tokenset.access_token

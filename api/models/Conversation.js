@@ -1,10 +1,8 @@
 const { logger } = require('@librechat/data-schemas');
-const { createTempChatExpirationDate, isEnabled } = require('@librechat/api');
+const { createTempChatExpirationDate } = require('@librechat/api');
 const { getMessages, deleteMessages } = require('./Message');
 const { Conversation } = require('~/db/models');
-
-// Feature flag to toggle between MongoDB and Solid storage
-const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
@@ -14,8 +12,8 @@ const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
  */
 const searchConversation = async (conversationId, req = null) => {
   try {
-    // Use Solid storage if enabled and req is provided with openidId
-    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
       try {
         const { getConvoFromSolid } = require('~/server/services/SolidStorage');
         const convo = await getConvoFromSolid(req, conversationId);
@@ -55,8 +53,8 @@ const searchConversation = async (conversationId, req = null) => {
  * @returns {Promise<TConversation>} The conversation object.
  */
 const getConvo = async (user, conversationId, req = null) => {
-  // Use Solid storage if enabled and req is provided with openidId
-  if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
     try {
       const { getConvoFromSolid } = require('~/server/services/SolidStorage');
       const convo = await getConvoFromSolid(req, conversationId);
@@ -142,8 +140,8 @@ module.exports = {
    * @returns {Promise<TConversation>} The conversation object.
    */
   saveConvo: async (req, { conversationId, newConversationId, ...convo }, metadata) => {
-    // Use Solid storage if enabled and user is a Solid user
-    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
       try {
         if (metadata?.context) {
           logger.debug(`[saveConvo] ${metadata.context}`);
@@ -272,8 +270,8 @@ module.exports = {
       req, // Optional req object for Solid storage
     } = {},
   ) => {
-    // Use Solid storage if enabled and req is provided
-    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
       try {
         const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
         return await getConvosByCursorFromSolid(req, {
@@ -471,8 +469,8 @@ module.exports = {
    * logger.error(result); // { n: 5, ok: 1, deletedCount: 5, messages: { n: 10, ok: 1, deletedCount: 10 } }
    */
   deleteConvos: async (user, filter, req = null) => {
-    // Use Solid storage if enabled and req is provided with openidId
-    if (USE_SOLID_STORAGE && req && req.user?.openidId) {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
       try {
         const { deleteConvosFromSolid } = require('~/server/services/SolidStorage');
         const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');

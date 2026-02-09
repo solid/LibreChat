@@ -2,7 +2,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { logger } = require('@librechat/data-schemas');
 const { ContentTypes } = require('librechat-data-provider');
-const { unescapeLaTeX, countTokens, isEnabled } = require('@librechat/api');
+const { unescapeLaTeX, countTokens } = require('@librechat/api');
 const {
   saveConvo,
   getMessage,
@@ -16,8 +16,7 @@ const { requireJwtAuth, validateMessageReq } = require('~/server/middleware');
 const { getConvosQueried } = require('~/models/Conversation');
 const { Message } = require('~/db/models');
 const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
-
-const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const router = express.Router();
 router.use(requireJwtAuth);
@@ -43,8 +42,8 @@ router.get('/', async (req, res) => {
     const sortOrder = sortDirection === 'asc' ? 1 : -1;
 
     if (conversationId && messageId) {
-      // Use Solid storage if enabled
-      if (USE_SOLID_STORAGE && req.user?.openidId) {
+      // Use Solid storage when user logged in via "Continue with Solid"
+      if (isSolidUser(req)) {
         try {
           const allMessages = await getMessagesFromSolid(req, conversationId);
           const message = allMessages.find(m => m.messageId === messageId);
@@ -69,8 +68,8 @@ router.get('/', async (req, res) => {
         response = { messages: message ? [message] : [], nextCursor: null };
       }
     } else if (conversationId) {
-      // Use Solid storage if enabled
-      if (USE_SOLID_STORAGE && req.user?.openidId) {
+      // Use Solid storage when user logged in via "Continue with Solid"
+      if (isSolidUser(req)) {
         try {
           const allMessages = await getMessagesFromSolid(req, conversationId);
           
@@ -358,8 +357,8 @@ router.get('/:conversationId', validateMessageReq, async (req, res) => {
   try {
     const { conversationId } = req.params;
     
-    // Use Solid storage if enabled
-    if (USE_SOLID_STORAGE && req.user?.openidId) {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
       try {
         const messages = await getMessagesFromSolid(req, conversationId);
         // Remove internal fields for response

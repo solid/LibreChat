@@ -1,4 +1,4 @@
-const { handleError, isEnabled } = require('@librechat/api');
+const { handleError } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const {
   EndpointURLs,
@@ -12,7 +12,7 @@ const assistants = require('~/server/services/Endpoints/assistants');
 const { getEndpointsConfig } = require('~/server/services/Config');
 const agents = require('~/server/services/Endpoints/agents');
 const { updateFilesUsage } = require('~/models');
-const USE_SOLID_STORAGE = process.env.USE_SOLID_STORAGE;
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const buildFunction = {
   [EModelEndpoint.agents]: agents.buildOptions,
@@ -93,8 +93,7 @@ async function buildEndpointOption(req, res, next) {
   // If model is missing and we have a conversationId, try to load it from Solid storage
   if (!parsedBody.model && req.body?.conversationId && 
       req.body.conversationId !== 'new' && 
-      isEnabled(USE_SOLID_STORAGE) && 
-      req.user?.openidId) {
+      isSolidUser(req)) {
     try {
       const { getConvoFromSolid } = require('~/server/services/SolidStorage');
       const conversation = await getConvoFromSolid(req, req.body.conversationId);
