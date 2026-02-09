@@ -13,6 +13,7 @@ const { getEndpointsConfig } = require('~/server/services/Config');
 const agents = require('~/server/services/Endpoints/agents');
 const { updateFilesUsage } = require('~/models');
 const { isSolidUser } = require('~/server/utils/isSolidUser');
+const { getConvoFromSolid } = require('~/server/services/SolidStorage');
 
 const buildFunction = {
   [EModelEndpoint.agents]: agents.buildOptions,
@@ -95,7 +96,6 @@ async function buildEndpointOption(req, res, next) {
       req.body.conversationId !== 'new' && 
       isSolidUser(req)) {
     try {
-      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
       const conversation = await getConvoFromSolid(req, req.body.conversationId);
       
       if (conversation?.model) {

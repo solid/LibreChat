@@ -3,6 +3,11 @@ const { logger } = require('@librechat/data-schemas');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
 const { isSolidUser } = require('~/server/utils/isSolidUser');
+const {
+  saveMessageToSolid,
+  updateMessageInSolid,
+  deleteMessagesFromSolid,
+} = require('~/server/services/SolidStorage');
 
 const idSchema = z.string().uuid();
 
@@ -51,8 +56,6 @@ async function saveMessage(req, params, metadata) {
   // Use Solid storage when user logged in via "Continue with Solid"
   if (isSolidUser(req)) {
     try {
-      const { saveMessageToSolid } = require('~/server/services/SolidStorage');
-      
       const messageData = {
         ...params,
         messageId: params.newMessageId || params.messageId,
@@ -283,7 +286,6 @@ async function updateMessage(req, message, metadata) {
   // Use Solid storage when user logged in via "Continue with Solid"
   if (isSolidUser(req)) {
     try {
-      const { updateMessageInSolid } = require('~/server/services/SolidStorage');
       const updatedMessage = await updateMessageInSolid(req, message, metadata);
       
       return {
@@ -355,7 +357,6 @@ async function deleteMessagesSince(req, { messageId, conversationId }) {
   // Use Solid storage when user logged in via "Continue with Solid"
   if (isSolidUser(req)) {
     try {
-      const { deleteMessagesFromSolid } = require('~/server/services/SolidStorage');
       const deletedCount = await deleteMessagesFromSolid(req, {
         messageId,
         conversationId,
