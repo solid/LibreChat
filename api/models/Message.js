@@ -1,12 +1,10 @@
 const { z } = require('zod');
 const { logger } = require('@librechat/data-schemas');
-const { createTempChatExpirationDate, isEnabled } = require('@librechat/api');
+const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const idSchema = z.string().uuid();
-
-// Feature flag to toggle between MongoDB and Solid storage
-const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
 
 /**
  * Saves a message in the database.
@@ -50,8 +48,8 @@ async function saveMessage(req, params, metadata) {
     return;
   }
 
-  // Use Solid storage if enabled
-  if (USE_SOLID_STORAGE) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
     try {
       const { saveMessageToSolid } = require('~/server/services/SolidStorage');
       
@@ -282,8 +280,8 @@ async function updateMessageText(req, { messageId, text }) {
  * @throws {Error} If there is an error in updating the message or if the message is not found.
  */
 async function updateMessage(req, message, metadata) {
-  // Use Solid storage if enabled
-  if (USE_SOLID_STORAGE) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
     try {
       const { updateMessageInSolid } = require('~/server/services/SolidStorage');
       const updatedMessage = await updateMessageInSolid(req, message, metadata);
@@ -354,8 +352,8 @@ async function updateMessage(req, message, metadata) {
  * @throws {Error} If there is an error in deleting messages.
  */
 async function deleteMessagesSince(req, { messageId, conversationId }) {
-  // Use Solid storage if enabled
-  if (USE_SOLID_STORAGE) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
     try {
       const { deleteMessagesFromSolid } = require('~/server/services/SolidStorage');
       const deletedCount = await deleteMessagesFromSolid(req, {

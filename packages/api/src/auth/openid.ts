@@ -39,8 +39,10 @@ export async function findOpenIDUser({
       `[${strategyName}] user ${user ? 'found' : 'not found'} with email: ${email} for openidId: ${openidId}`,
     );
 
-    // If user found by email, check if they're allowed to use OpenID provider
-    if (user && user.provider && user.provider !== 'openid') {
+    // If user found by email, check if they're allowed to use this provider (OpenID or Solid)
+    const allowedProviders =
+      strategyName === 'SolidOpenidStrategy' ? ['openid', 'solid'] : ['openid'];
+    if (user && user.provider && !allowedProviders.includes(user.provider)) {
       logger.warn(
         `[${strategyName}] Attempted OpenID login by user ${user.email}, was registered with "${user.provider}" provider`,
       );
@@ -52,7 +54,7 @@ export async function findOpenIDUser({
       logger.info(
         `[${strategyName}] Preparing user ${user.email} for migration to OpenID with sub: ${openidId}`,
       );
-      user.provider = 'openid';
+      user.provider = strategyName === 'SolidOpenidStrategy' ? 'solid' : 'openid';
       user.openidId = openidId;
       return { user, error: null, migration: true };
     }

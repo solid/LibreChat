@@ -18,6 +18,7 @@ const requireJwtAuth = require('~/server/middleware/requireJwtAuth');
 const { importConversations } = require('~/server/utils/import');
 const { deleteToolCalls } = require('~/models/ToolCall');
 const getLogStores = require('~/cache/getLogStores');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -57,8 +58,7 @@ router.get('/', async (req, res) => {
       error: error.message,
       stack: error.stack,
       userId: req.user?.id,
-      hasOpenidId: !!req.user?.openidId,
-      useSolidStorage: process.env.USE_SOLID_STORAGE,
+      isSolidUser: isSolidUser(req),
     });
     res.status(500).json({ 
       error: 'Error fetching conversations',
@@ -73,8 +73,7 @@ router.get('/:conversationId', async (req, res) => {
   logger.info('[GET /api/convos/:conversationId] Fetching conversation', {
     conversationId,
     userId: req.user?.id,
-    hasOpenidId: !!req.user?.openidId,
-    useSolidStorage: isEnabled(process.env.USE_SOLID_STORAGE),
+    isSolidUser: isSolidUser(req),
   });
   
   try {

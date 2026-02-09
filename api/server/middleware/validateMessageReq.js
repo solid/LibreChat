@@ -1,8 +1,6 @@
 const { getConvo } = require('~/models');
-const { isEnabled } = require('@librechat/api');
 const { getConvoFromSolid } = require('~/server/services/SolidStorage');
-
-const USE_SOLID_STORAGE = isEnabled(process.env.USE_SOLID_STORAGE);
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 // Middleware to validate conversationId and user relationship
 const validateMessageReq = async (req, res, next) => {
@@ -18,8 +16,8 @@ const validateMessageReq = async (req, res, next) => {
 
   let conversation = null;
 
-  // Use Solid storage if enabled
-  if (USE_SOLID_STORAGE && req.user?.openidId) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
     try {
       conversation = await getConvoFromSolid(req, conversationId);
     } catch (error) {

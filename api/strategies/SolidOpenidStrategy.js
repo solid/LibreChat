@@ -441,7 +441,7 @@ async function setupSolidOpenId() {
 
           if (!user) {
             user = {
-              provider: 'openid',
+              provider: 'solid',
               openidId: userinfo.sub,
               username,
               email: email || '',
@@ -453,7 +453,7 @@ async function setupSolidOpenId() {
             const balanceConfig = getBalanceConfig(appConfig);
             user = await createUser(user, balanceConfig, true, true);
           } else {
-            user.provider = 'openid';
+            user.provider = 'solid';
             user.openidId = userinfo.sub;
             user.username = username;
             user.name = fullName;
