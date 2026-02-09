@@ -3,8 +3,10 @@ const { logger } = require('@librechat/data-schemas');
 const { EModelEndpoint, Constants, ForkOptions } = require('librechat-data-provider');
 const { createImportBatchBuilder } = require('./importBatchBuilder');
 const BaseClient = require('~/app/clients/BaseClient');
-const { getConvo } = require('~/models/Conversation');
-const { getMessages } = require('~/models/Message');
+const { getConvo, saveConvo } = require('~/models/Conversation');
+const { getMessages, saveMessage } = require('~/models/Message');
+const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 /**
  * Helper function to clone messages with proper parent-child relationships and timestamps
@@ -361,8 +363,6 @@ function splitAtTargetLevel(messages, targetMessageId) {
  * @param {object} [params.req] - Optional Express request object for Solid storage support.
  * @returns {Promise<{ conversation: TConversation, messages: TMessage[] }>} The duplicated conversation and messages.
  */
-const { isSolidUser } = require('~/server/utils/isSolidUser');
-
 async function duplicateConversation({ userId, conversationId, req }) {
   const useSolidStorage = isSolidUser(req);
 
@@ -375,7 +375,6 @@ async function duplicateConversation({ userId, conversationId, req }) {
   // Get original messages
   let originalMessages;
   if (useSolidStorage) {
-    const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
     originalMessages = await getMessagesFromSolid(req, conversationId);
   } else {
     originalMessages = await getMessages({
@@ -395,9 +394,6 @@ async function duplicateConversation({ userId, conversationId, req }) {
 
   // For Solid users, save individually to support Solid storage
   if (useSolidStorage) {
-    const { saveConvo } = require('~/models/Conversation');
-    const { saveMessage } = require('~/models/Message');
-    const { v4: uuidv4 } = require('uuid');
     const newConversationId = uuidv4();
     const now = new Date();
 
@@ -462,7 +458,6 @@ async function duplicateConversation({ userId, conversationId, req }) {
     );
 
     // Get the saved conversation and messages
-    const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
     const conversation = await getConvo(userId, newConversationId, req);
     const messages = await getMessagesFromSolid(req, newConversationId);
 

@@ -3,6 +3,12 @@ const { createTempChatExpirationDate } = require('@librechat/api');
 const { getMessages, deleteMessages } = require('./Message');
 const { Conversation } = require('~/db/models');
 const { isSolidUser } = require('~/server/utils/isSolidUser');
+const {
+  getConvoFromSolid,
+  saveConvoToSolid,
+  getConvosByCursorFromSolid,
+  deleteConvosFromSolid,
+} = require('~/server/services/SolidStorage');
 
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
@@ -14,7 +20,6 @@ const searchConversation = async (conversationId, req = null) => {
   try {
     // Solid users: use Solid storage only; no MongoDB fallback 
     if (isSolidUser(req)) {
-      const { getConvoFromSolid } = require('~/server/services/SolidStorage');
       const convo = await getConvoFromSolid(req, conversationId);
       if (convo) {
         return {
@@ -42,7 +47,6 @@ const searchConversation = async (conversationId, req = null) => {
 const getConvo = async (user, conversationId, req = null) => {
   // Solid users: use Solid storage only; no MongoDB fallback 
   if (isSolidUser(req)) {
-    const { getConvoFromSolid } = require('~/server/services/SolidStorage');
     const convo = await getConvoFromSolid(req, conversationId);
     return convo ?? null;
   }
@@ -117,8 +121,6 @@ module.exports = {
           logger.debug(`[saveConvo] ${metadata.context}`);
         }
 
-        const { saveConvoToSolid } = require('~/server/services/SolidStorage');
-        
         const convoData = {
           conversationId,
           newConversationId,
@@ -239,7 +241,6 @@ module.exports = {
   ) => {
 
     if (isSolidUser(req)) {
-      const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
       return await getConvosByCursorFromSolid(req, {
         cursor,
         limit,
@@ -430,9 +431,6 @@ module.exports = {
     // Use Solid storage when user logged in via "Continue with Solid"
     if (isSolidUser(req)) {
       try {
-        const { deleteConvosFromSolid } = require('~/server/services/SolidStorage');
-        const { getConvosByCursorFromSolid } = require('~/server/services/SolidStorage');
-
         let conversationIds = [];
 
         // If conversationId is specified in filter, use it directly

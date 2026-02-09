@@ -439,7 +439,6 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
 
       // Check if this is a Solid user (logged in via "Continue with Solid")
       const { isSolidUser } = require('~/server/utils/isSolidUser');
-
       let conversation;
       let conversationMessages;
       let podUrl: string | undefined;
@@ -480,8 +479,14 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
             openidId: req.user?.openidId,
           });
           
-          const { getConvoFromSolid, getMessagesFromSolid, getPodUrl, setPublicAccessForShare } = require('~/server/services/SolidStorage');
-          const authenticatedFetch = await require('~/server/services/SolidStorage').getSolidFetch(req);
+          const {
+            getConvoFromSolid,
+            getMessagesFromSolid,
+            getPodUrl,
+            setPublicAccessForShare,
+            getSolidFetch,
+          } = require('~/server/services/SolidStorage');
+          const authenticatedFetch = await getSolidFetch(req);
           
           // Get Pod URL
           podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
