@@ -82,7 +82,14 @@ async function saveMessage(req, params, metadata) {
 
   if (isSolidUser(req)) {
     try {
-      const savedMessage = await saveMessageToSolid(req, baseMessage, metadata);
+      // Full document aligned with schema (same shape as MongoDB); SolidStorage only persists it
+      const messageDocument = {
+        ...baseMessage,
+        user: req.user.id,
+        createdAt: baseMessage.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const savedMessage = await saveMessageToSolid(req, messageDocument, metadata);
       return savedMessage;
     } catch (err) {
       logger.error('Error saving message to Solid Pod:', err);
