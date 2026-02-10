@@ -86,7 +86,7 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Added fallback mechanism for schema validation failures
   - Extracts `model` and `endpoint` from messages when missing in conversation metadata
   - Ensures `resendFiles` is included in payloads for agents endpoints (defaults to `true`)
-  - Fixed model extraction in `buildEndpointOption` middleware to load from Solid when missing
+  - **buildEndpointOption** (per PR review): Uses storage-agnostic `getConvo(req.user.id, conversationId, req)` to fill missing model; no Solid-specific logic in that middleware—storage is chosen in the model layer
 
 ### 10. Full Conversation Flow
 - **Status**: Complete
@@ -100,9 +100,9 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 - **Status**: Complete
 - **Details**:
   - Conversation titles are properly saved to Solid Pod when generated
-  - Titles persist correctly after page refresh
+  - Titles persist correctly after page refresh and after sending more messages
   - `saveConvo` correctly identifies Solid users before saving to Solid Pod
-  - `saveConvoToSolid` merges updates with existing conversation data to prevent data loss
+  - **saveConvoToSolid** merges existing Pod conversation into the incoming document before writing, so partial updates (e.g. after POST message or BaseClient saveConvo) preserve fields like `title` instead of overwriting the file and losing the generated title
 
 ### 12. Conversation Management Operations
 - **Status**: Complete
@@ -123,6 +123,21 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - Dynamically detects Solid users and routes to appropriate sharing method
   - Fetches shared messages directly from Pod using unauthenticated requests
   - Properly removes public access when share is deleted
+
+### 14. Schema-Aligned Document Content (PR Review)
+- **Status**: Complete
+- **Details**:
+  - **Single source of document shape**: JSON written to the Solid Pod now matches the same document shape as MongoDB; shape is defined in the model layer and aligned with `packages/data-schemas` (message + convo schema and types).
+  - **Messages**: `Message.js` builds the full message document (including `user`, `createdAt`, `updatedAt`) and passes it to `saveMessageToSolid`. SolidStorage only validates ids, resolves paths, and writes that document; the previous hand-built field list and defaults in SolidStorage were removed.
+  - **Conversations**: `Conversation.js` builds the full conversation document (conversationId, user, …convo, expiredAt, `previousConversationId` when renaming) and passes it to `saveConvoToSolid`. SolidStorage only adds Pod-specific data (message refs from the Pod, timestamps, optional model/endpoint fallback from messages), then merges with existing Pod conversation (to preserve e.g. title on partial updates) and writes. It no longer constructs the conversation payload from a custom field list.
+  - **Partial updates**: When the caller sends a partial update (e.g. after sending a message with no `title`), existing conversation from the Pod is merged into the incoming document before writing so fields like `title` are preserved.
+
+### 15. PR Review: Config, Logging, Convos
+- **Status**: Complete
+- **Details**:
+  - **config.js**: `openidLoginEnabled` set to `isOpenIdEnabled` only (removed `|| isSolidEnabled`) so when only Solid is enabled the login page shows one Solid button, not both OpenID and Solid.
+  - **requireJwtAuth.js**: Removed non–Solid-specific debug logging added during auth flow debugging; reviewer suggested upstreaming useful logging in a separate PR if needed.
+  - **convos.js**: No code change; reviewer concern addressed by clarification—`getConvo(req.user.id, conversationId, req)` in `Conversation.js` already branches on `isSolidUser(req)` and uses Solid when the user is a Solid user.
 
 ## Current Status
 
@@ -196,22 +211,23 @@ None currently identified.
 
 
 ## Files Modified
-- `api/server/services/SolidStorage.js` (NEW) - Core Solid Pod operations
+- `api/server/services/SolidStorage.js` (NEW) - Core Solid Pod operations; schema-aligned: accepts full document from model layer, only adds message refs + timestamps + merge with existing for partial updates (no custom document content)
 - `api/server/utils/isSolidUser.js` (NEW) - Shared helper to detect Solid login (`provider === 'solid'`), used across models, routes, and middleware (DRY)
-- `api/models/Message.js` - Integrated Solid storage; MongoDB path for non-Solid users only (no fallback for Solid)
-- `api/models/Conversation.js` - Integrated Solid storage; no MongoDB fallback for Solid users (return null/rethrow on Solid failure)
+- `api/models/Message.js` - Integrated Solid storage; builds full message document (user, createdAt, updatedAt) and passes to SolidStorage; MongoDB path for non-Solid users only (no fallback for Solid)
+- `api/models/Conversation.js` - Integrated Solid storage; builds full conversation document and passes to SolidStorage; no MongoDB fallback for Solid users (return null/rethrow on Solid failure); passes `previousConversationId` when renaming
 - `api/server/routes/oauth.js` - Token logging and storage
 - `api/server/services/AuthService.js` - Token management
 - `api/server/index.js` - Session middleware ordering
 - `api/server/controllers/AuthController.js` - Refresh token handling
 - `api/server/middleware/validate/convoAccess.js` - Added Solid storage support for conversation access validation
-- `api/server/middleware/buildEndpointOption.js` - Added model extraction from Solid storage when missing; uses shared `isSolidUser`
+- `api/server/middleware/buildEndpointOption.js` - Uses storage-agnostic `getConvo(req.user.id, conversationId, req)` to fill missing model (no Solid-specific logic)
 - `api/server/middleware/validateMessageReq.js` - Solid storage validation; no MongoDB fallback for Solid users (404 on Solid failure)
+- `api/server/middleware/requireJwtAuth.js` - Removed debug auth logging (per PR review)
+- `api/server/routes/config.js` - `openidLoginEnabled: isOpenIdEnabled` only so Solid-only shows one button (per PR review)
 - `api/server/routes/messages.js` - Solid message reads return 503 on Solid failure (no MongoDB fallback)
 - `api/server/services/Endpoints/agents/initialize.js` - Enhanced model discovery from request body and endpointOption
 - `packages/data-provider/src/createPayload.ts` - Added normalization for Solid conversation objects and fallback handling
-- `api/models/Conversation.js` - Fixed `saveConvo` to check for Solid users before saving to Solid Pod, added Solid storage support to `deleteConvos`
-- `api/server/services/SolidStorage.js` - Enhanced `saveConvoToSolid` to merge updates with existing conversation data, improved message deletion logging
+- `api/server/services/SolidStorage.js` - Schema-aligned: `saveMessageToSolid` accepts full message document; `saveConvoToSolid` accepts full convo document, merges with existing Pod conversation to preserve title (and other fields) on partial updates
 - `api/server/utils/import/fork.js` - Added Solid storage support to `duplicateConversation` function
 - `api/server/routes/convos.js` - Updated duplicate and delete endpoints to pass `req` for Solid storage support
 - `api/server/services/SolidStorage.js` - Added `isArchived` field support in `saveConvoToSolid` and `getConvosByCursorFromSolid` for archive functionality
@@ -267,11 +283,11 @@ The following environment variables are used for the generic "Login with OpenID"
 - Storage is chosen per user: **Solid Pod** for users who logged in with "Continue with Solid" (`provider === 'solid'`); **MongoDB** for everyone else. No environment variable is required.
 
 ### Imports (top-level vs inline)
-- **API code** (Conversation.js, Message.js, buildEndpointOption.js, validateMessageReq.js, messages.js, convos.js, fork.js): SolidStorage and isSolidUser are required at **top level** for clarity and tooling (per PR review).
+- **API code** (Conversation.js, Message.js, buildEndpointOption.js, validateMessageReq.js, messages.js, convos.js, fork.js): SolidStorage and isSolidUser are required at **top level** for clarity and tooling (per PR review). buildEndpointOption.js now uses only `getConvo` from `~/models` (no SolidStorage/isSolidUser).
 - **packages/data-schemas share.ts**: SolidStorage and isSolidUser use **inline** `require()` inside the functions that need them, to avoid a circular dependency (data-schemas ← SolidStorage ← data-schemas for `logger`). Top-level require there caused `logger` to be undefined at load time and backend crash.
 
 ---
 
-**Report Date**: February 11, 2026
+**Report Date**: February 10, 2026
 
 
