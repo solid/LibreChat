@@ -11,9 +11,7 @@ const azureAssistants = require('~/server/services/Endpoints/azureAssistants');
 const assistants = require('~/server/services/Endpoints/assistants');
 const { getEndpointsConfig } = require('~/server/services/Config');
 const agents = require('~/server/services/Endpoints/agents');
-const { updateFilesUsage } = require('~/models');
-const { isSolidUser } = require('~/server/utils/isSolidUser');
-const { getConvoFromSolid } = require('~/server/services/SolidStorage');
+const { updateFilesUsage, getConvo } = require('~/models');
 
 const buildFunction = {
   [EModelEndpoint.agents]: agents.buildOptions,
@@ -91,23 +89,18 @@ async function buildEndpointOption(req, res, next) {
     }
   }
 
-  // If model is missing and we have a conversationId, try to load it from Solid storage
-  if (!parsedBody.model && req.body?.conversationId && 
-      req.body.conversationId !== 'new' && 
-      isSolidUser(req)) {
+  // If model is missing and we have a conversationId, load the conversation (Solid or MongoDB) to get the model
+  if (!parsedBody.model && req.body?.conversationId && req.body.conversationId !== 'new') {
     try {
-      const conversation = await getConvoFromSolid(req, req.body.conversationId);
-      
+      const conversation = await getConvo(req.user?.id, req.body.conversationId, req);
       if (conversation?.model) {
         parsedBody.model = conversation.model;
       }
     } catch (error) {
-      // Don't fail the request if we can't load from Solid - just log a warning
-      logger.warn('[buildEndpointOption] Could not load conversation from Solid to extract model', {
+      logger.warn('[buildEndpointOption] Could not load conversation to extract model', {
         conversationId: req.body.conversationId,
         error: error.message,
       });
-      // Continue without the model - it might be set elsewhere or the request might fail later
     }
   }
 
