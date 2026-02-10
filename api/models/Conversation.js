@@ -138,7 +138,17 @@ module.exports = {
 
     if (isSolidUser(req)) {
       try {
-        const savedConvo = await saveConvoToSolid(req, baseConvo, metadata);
+        // Full document aligned with schema (same shape as MongoDB); SolidStorage adds messages + timestamps
+        const finalConversationId = newConversationId || conversationId;
+        const convoDocument = {
+          ...baseConvo,
+          conversationId: finalConversationId,
+          user: req.user.id,
+        };
+        if (newConversationId && newConversationId !== conversationId) {
+          convoDocument.previousConversationId = conversationId;
+        }
+        const savedConvo = await saveConvoToSolid(req, convoDocument, metadata);
         return savedConvo;
       } catch (error) {
         logger.error('[saveConvo] Error saving conversation to Solid Pod', error);

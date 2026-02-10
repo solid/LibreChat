@@ -461,127 +461,63 @@ async function ensureBaseStructure(podUrl, fetch) {
 }
 
 /**
- * Save a message to Solid Pod
- * 
+ * Save a message to Solid Pod.
+ * Document content is built in the model layer (schema-aligned); this only persists it.
+ *
  * @param {Object} req - Express request object
- * @param {Object} messageData - Message data to save
- * @param {string} messageData.messageId - Message ID
- * @param {string} messageData.conversationId - Conversation ID
- * @param {string} messageData.text - Message text
- * @param {string} messageData.sender - Sender identifier
- * @param {boolean} messageData.isCreatedByUser - Whether message was created by user
- * @param {string} messageData.endpoint - Endpoint where message originated
- * @param {string} [messageData.parentMessageId] - Parent message ID
- * @param {string} [messageData.error] - Error message
- * @param {boolean} [messageData.unfinished] - Whether message is unfinished
- * @param {Array} [messageData.files] - Files associated with message
- * @param {string} [messageData.finish_reason] - Finish reason
- * @param {number} [messageData.tokenCount] - Token count
- * @param {string} [messageData.plugin] - Plugin name
- * @param {Array} [messageData.plugins] - Plugin array
- * @param {string} [messageData.model] - Model used
- * @param {Date} [messageData.expiredAt] - Expiration date
+ * @param {Object} messageDocument - Full message document (same shape as MongoDB / IMessage)
  * @param {Object} [metadata] - Additional metadata
- * @returns {Promise<Object>} Saved message data
+ * @returns {Promise<Object>} Saved message document
  */
-async function saveMessageToSolid(req, messageData, metadata) {
+async function saveMessageToSolid(req, messageDocument, metadata) {
   try {
     logger.info('[SolidStorage] Saving message to Solid Pod', {
-      messageId: messageData.messageId,
-      conversationId: messageData.conversationId,
+      messageId: messageDocument.messageId,
+      conversationId: messageDocument.conversationId,
       context: metadata?.context,
     });
 
-    // Validate required fields
     if (!req?.user?.id) {
       throw new Error('User not authenticated');
     }
-
-    if (!messageData.messageId) {
+    if (!messageDocument.messageId) {
       throw new Error('messageId is required');
     }
-
-    if (!messageData.conversationId) {
+    if (!messageDocument.conversationId) {
       throw new Error('conversationId is required');
     }
 
-    // Get authenticated fetch and Pod URL
     const authenticatedFetch = await getSolidFetch(req);
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
-
-    // Ensure base structure exists
     await ensureBaseStructure(podUrl, authenticatedFetch);
 
-    // Ensure messages container for this conversation exists
-    const messagesContainerPath = getMessagesContainerPath(podUrl, messageData.conversationId);
+    const messagesContainerPath = getMessagesContainerPath(podUrl, messageDocument.conversationId);
     await ensureContainerExists(messagesContainerPath, authenticatedFetch);
 
-    // Prepare message object with all fields
-    const messageToSave = {
-      messageId: messageData.newMessageId || messageData.messageId,
-      conversationId: messageData.conversationId,
-      user: req.user.id,
-      text: messageData.text || '',
-      content: messageData.content || undefined, // For agent endpoints, content is an array
-      sender: messageData.sender,
-      isCreatedByUser: messageData.isCreatedByUser,
-      endpoint: messageData.endpoint,
-      parentMessageId: messageData.parentMessageId || null,
-      error: messageData.error || null,
-      unfinished: messageData.unfinished || false,
-      files: messageData.files || [],
-      finish_reason: messageData.finish_reason || null,
-      tokenCount: messageData.tokenCount || 0,
-      plugin: messageData.plugin || null,
-      plugins: messageData.plugins || [],
-      model: messageData.model || null,
-      expiredAt: messageData.expiredAt || null,
-      createdAt: messageData.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Get message file path
     const messagePath = getMessagePath(
       podUrl,
-      messageData.conversationId,
-      messageToSave.messageId
+      messageDocument.conversationId,
+      messageDocument.messageId
     );
 
-    // Convert message to JSON string
-    const messageJson = JSON.stringify(messageToSave, null, 2);
-    
-    // Use Buffer for Node.js compatibility (Blob is available in Node 18+ but Buffer is more universal)
+    const messageJson = JSON.stringify(messageDocument, null, 2);
     const messageBuffer = Buffer.from(messageJson, 'utf-8');
 
     logger.debug('[SolidStorage] Saving message file', {
       messagePath,
-      messageId: messageToSave.messageId,
-      conversationId: messageToSave.conversationId,
-      textLength: messageToSave.text?.length || 0,
-      hasContent: !!messageToSave.content,
-      contentLength: Array.isArray(messageToSave.content) ? messageToSave.content.length : 0,
-      contentTypes: Array.isArray(messageToSave.content) 
-        ? messageToSave.content.map(c => c?.type).filter(Boolean)
-        : [],
+      messageId: messageDocument.messageId,
+      conversationId: messageDocument.conversationId,
       bufferSize: messageBuffer.length,
     });
 
-    // Check if message already exists (for update vs create)
     let messageExists = false;
     try {
       await getFile(messagePath, { fetch: authenticatedFetch });
       messageExists = true;
-      logger.debug('[SolidStorage] Message file already exists, will overwrite', {
-        messagePath,
-      });
     } catch (error) {
       if (error.status === 404 || error.message?.includes('404')) {
         messageExists = false;
-        logger.debug('[SolidStorage] Message file does not exist, will create', {
-          messagePath,
-        });
       } else {
-        // Some other error occurred, log it but continue
         logger.warn('[SolidStorage] Error checking if message exists, will try to save anyway', {
           messagePath,
           error: error.message,
@@ -589,7 +525,6 @@ async function saveMessageToSolid(req, messageData, metadata) {
       }
     }
 
-    // Save or overwrite the message file
     if (messageExists) {
       await overwriteFile(messagePath, messageBuffer, {
         contentType: 'application/json',
@@ -597,17 +532,17 @@ async function saveMessageToSolid(req, messageData, metadata) {
       });
       logger.info('[SolidStorage] Message file overwritten successfully', {
         messagePath,
-        messageId: messageToSave.messageId,
+        messageId: messageDocument.messageId,
       });
     } else {
       await saveFileInContainer(messagesContainerPath, messageBuffer, {
-        slug: `${messageToSave.messageId}.json`,
+        slug: `${messageDocument.messageId}.json`,
         contentType: 'application/json',
         fetch: authenticatedFetch,
       });
       logger.info('[SolidStorage] Message file saved successfully', {
         messagePath,
-        messageId: messageToSave.messageId,
+        messageId: messageDocument.messageId,
       });
     }
 
@@ -615,11 +550,11 @@ async function saveMessageToSolid(req, messageData, metadata) {
       logger.info(`[SolidStorage] ---saveMessageToSolid context: ${metadata.context}`);
     }
 
-    return messageToSave;
+    return messageDocument;
   } catch (error) {
     logger.error('[SolidStorage] Error saving message to Solid Pod', {
-      messageId: messageData?.messageId,
-      conversationId: messageData?.conversationId,
+      messageId: messageDocument?.messageId,
+      conversationId: messageDocument?.conversationId,
       error: error.message,
       stack: error.stack,
       context: metadata?.context,
@@ -1173,62 +1108,37 @@ async function deleteMessagesFromSolid(req, params) {
 }
 
 /**
- * Save a conversation to Solid Pod
- * 
+ * Save a conversation to Solid Pod.
+ * Document content is built in the model layer (schema-aligned); this only adds
+ * messages refs + timestamps and persists it.
+ *
  * @param {Object} req - Express request object
- * @param {Object} convoData - Conversation data to save
- * @param {string} convoData.conversationId - Conversation ID (required)
- * @param {string} [convoData.newConversationId] - New conversation ID (for renaming)
- * @param {string} [convoData.title] - Conversation title
- * @param {string} [convoData.endpoint] - Endpoint where conversation originated
- * @param {string} [convoData.model] - Model used
- * @param {string} [convoData.agent_id] - Agent ID
- * @param {string} [convoData.assistant_id] - Assistant ID
- * @param {string} [convoData.spec] - Spec
- * @param {string} [convoData.iconURL] - Icon URL
- * @param {Array} [convoData.messages] - Array of message references
- * @param {Array} [convoData.files] - Array of file IDs
- * @param {string} [convoData.promptPrefix] - Prompt prefix
- * @param {number} [convoData.temperature] - Temperature setting
- * @param {number} [convoData.topP] - Top P setting
- * @param {number} [convoData.presence_penalty] - Presence penalty
- * @param {number} [convoData.frequency_penalty] - Frequency penalty
- * @param {Date} [convoData.expiredAt] - Expiration date
+ * @param {Object} convoDocument - Full conversation document (same shape as MongoDB / IConversation)
  * @param {Object} [metadata] - Additional metadata
- * @returns {Promise<Object>} Saved conversation data
+ * @returns {Promise<Object>} Saved conversation document
  */
-async function saveConvoToSolid(req, convoData, metadata) {
+async function saveConvoToSolid(req, convoDocument, metadata) {
   try {
+    const finalConversationId = convoDocument.conversationId;
     logger.info('[SolidStorage] Saving conversation to Solid Pod', {
-      conversationId: convoData.conversationId,
-      newConversationId: convoData.newConversationId,
+      conversationId: finalConversationId,
+      newConversationId: convoDocument.newConversationId,
       context: metadata?.context,
     });
 
-    // Validate required fields
     if (!req?.user?.id) {
       throw new Error('User not authenticated');
     }
-
-    if (!convoData.conversationId && !convoData.newConversationId) {
-      throw new Error('conversationId or newConversationId is required');
+    if (!finalConversationId) {
+      throw new Error('conversationId is required');
     }
 
-    // Use newConversationId if provided, otherwise use conversationId
-    const finalConversationId = convoData.newConversationId || convoData.conversationId;
-
-    // Get authenticated fetch and Pod URL
     const authenticatedFetch = await getSolidFetch(req);
-    // 
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
-
-    // Ensure base structure exists
     await ensureBaseStructure(podUrl, authenticatedFetch);
 
-    // Get conversation file path
     const conversationPath = getConversationPath(podUrl, finalConversationId);
 
-    // Check if conversation already exists and load it to preserve existing data
     let existingConversation = null;
     try {
       const existingFile = await getFile(conversationPath, { fetch: authenticatedFetch });
@@ -1251,62 +1161,38 @@ async function saveConvoToSolid(req, convoData, metadata) {
       }
     }
 
-    // Get messages for this conversation (just IDs for reference)
-    // Note: We call getMessagesFromSolid directly since it's in the same module
     const messages = await getMessagesFromSolid(req, finalConversationId);
     const messageRefs = messages.map((msg) => ({
       messageId: msg.messageId,
       createdAt: msg.createdAt,
     }));
 
-    // Start with existing conversation data if available, otherwise use defaults
-    const baseConversation = existingConversation || {
-      conversationId: finalConversationId,
-      user: req.user.id,
-      createdAt: new Date().toISOString(),
-    };
+    // Preserve existing Pod fields (e.g. title) when the user only sends a partial update (e.g. after sending a message)
+    if (existingConversation) {
+      convoDocument = { ...existingConversation, ...convoDocument };
+    }
 
-    // If model or endpoint are missing, try to extract them from messages
-    let finalModel = convoData.model ?? baseConversation.model;
-    let finalEndpoint = convoData.endpoint ?? baseConversation.endpoint;
-    
-    if (!finalModel || !finalEndpoint) {
-      // Find the first message with a model (usually the AI response)
-      const messageWithModel = messages.find(msg => msg.model && msg.endpoint);
-      
+    // Fill missing model/endpoint from first message (schema content stays in model layer; this is a fallback)
+    if ((!convoDocument.model || !convoDocument.endpoint) && messages.length > 0) {
+      const messageWithModel = messages.find((msg) => msg.model && msg.endpoint);
       if (messageWithModel) {
-        if (!finalModel && messageWithModel.model) {
-          logger.info('[SolidStorage] Extracting model from messages when saving', {
-            conversationId: finalConversationId,
-            extractedModel: messageWithModel.model,
-          });
-          finalModel = messageWithModel.model;
+        if (!convoDocument.model && messageWithModel.model) {
+          convoDocument.model = messageWithModel.model;
         }
-        
-        if (!finalEndpoint && messageWithModel.endpoint) {
-          logger.info('[SolidStorage] Extracting endpoint from messages when saving', {
-            conversationId: finalConversationId,
-            extractedEndpoint: messageWithModel.endpoint,
-          });
-          finalEndpoint = messageWithModel.endpoint;
+        if (!convoDocument.endpoint && messageWithModel.endpoint) {
+          convoDocument.endpoint = messageWithModel.endpoint;
         }
       }
     }
 
-    // Merge existing conversation with updates from convoData
-    // convoData takes precedence for fields that are explicitly provided
-    const conversationToSave = {
-      ...baseConversation,
-      ...convoData,
-      conversationId: finalConversationId,
-      user: req.user.id,
-      messages: messageRefs,
-      createdAt: baseConversation.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    convoDocument.messages = messageRefs;
+    convoDocument.updatedAt = new Date().toISOString();
+    convoDocument.createdAt = convoDocument.createdAt || existingConversation?.createdAt || new Date().toISOString();
 
-    // Convert to JSON and create buffer
-    const conversationJson = JSON.stringify(conversationToSave, null, 2);
+    const previousConversationId = convoDocument.previousConversationId;
+    delete convoDocument.previousConversationId;
+
+    const conversationJson = JSON.stringify(convoDocument, null, 2);
     const conversationBuffer = Buffer.from(conversationJson, 'utf-8');
 
     logger.debug('[SolidStorage] Saving conversation file', {
@@ -1315,17 +1201,15 @@ async function saveConvoToSolid(req, convoData, metadata) {
       messageCount: messageRefs.length,
     });
 
-    // Determine if conversation exists (we already loaded it above if it exists)
     const conversationExists = existingConversation !== null;
 
-    // If conversationId changed, delete old file
-    if (convoData.newConversationId && convoData.conversationId !== convoData.newConversationId) {
-      const oldConversationPath = getConversationPath(podUrl, convoData.conversationId);
+    if (previousConversationId) {
+      const oldConversationPath = getConversationPath(podUrl, previousConversationId);
       try {
         await deleteFile(oldConversationPath, { fetch: authenticatedFetch });
         logger.info('[SolidStorage] Old conversation file deleted after rename', {
           oldConversationPath,
-          newConversationId: convoData.newConversationId,
+          newConversationId: convoDocument.conversationId,
         });
       } catch (error) {
         if (error.status !== 404) {
@@ -1337,7 +1221,6 @@ async function saveConvoToSolid(req, convoData, metadata) {
       }
     }
 
-    // Save or overwrite the conversation file
     const conversationsContainerPath = `${getBaseStoragePath(podUrl)}conversations/`;
     if (conversationExists) {
       await overwriteFile(conversationPath, conversationBuffer, {
@@ -1364,11 +1247,11 @@ async function saveConvoToSolid(req, convoData, metadata) {
       logger.info(`[SolidStorage] ---saveConvoToSolid context: ${metadata.context}`);
     }
 
-    return conversationToSave;
+    return convoDocument;
   } catch (error) {
     logger.error('[SolidStorage] Error saving conversation to Solid Pod', {
-      conversationId: convoData?.conversationId,
-      newConversationId: convoData?.newConversationId,
+      conversationId: convoDocument?.conversationId,
+      newConversationId: convoDocument?.newConversationId,
       error: error.message,
       stack: error.stack,
       context: metadata?.context,
