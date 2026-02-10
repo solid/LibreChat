@@ -169,13 +169,6 @@ router.get('/chat/status/:conversationId', async (req, res) => {
   const resumeState = await GenerationJobManager.getResumeState(conversationId);
   const isActive = job.status === 'running';
 
-  logger.debug('[GET /api/agents/chat/status/:conversationId] Job status check', {
-    conversationId,
-    jobStatus: job.status,
-    isActive,
-    userId: req.user.id,
-  });
-
   res.json({
     active: isActive,
     streamId: conversationId,
