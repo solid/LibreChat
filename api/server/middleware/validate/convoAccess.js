@@ -59,11 +59,6 @@ const validateConvoAccess = async (req, res, next) => {
     }
 
     if (conversation.user !== userId) {
-      logger.error('[validateConvoAccess] Authorization failed', {
-        conversationId,
-        conversationUserId: conversation.user,
-        currentUserId: userId,
-      });
       const errorMessage = {
         type,
         error: 'User not authorized for this conversation',
