@@ -4,9 +4,11 @@ const passport = require('passport');
 const { randomState } = require('openid-client');
 const { logger } = require('@librechat/data-schemas');
 const { ErrorTypes } = require('librechat-data-provider');
-const { createSetBalanceConfig } = require('@librechat/api');
-const { checkDomainAllowed, loginLimiter, logHeaders } = require('~/server/middleware');
+const { createSetBalanceConfig, isEnabled } = require('@librechat/api');
+const { checkDomainAllowed, loginLimiter, logHeaders, checkBan } = require('~/server/middleware');
 const { createOAuthHandler } = require('~/server/controllers/auth/oauth');
+const { setAuthTokens, setOpenIDAuthTokens } = require('~/server/services/AuthService');
+const { syncUserEntraGroupMemberships } = require('~/server/services/PermissionService');
 const { getAppConfig } = require('~/server/services/Config');
 const { Balance } = require('~/db/models');
 

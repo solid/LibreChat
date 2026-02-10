@@ -8,7 +8,7 @@ import { apiBaseUrl } from './api-endpoints';
 import { FileSources } from './types/files';
 import { MCPServersSchema } from './mcp';
 
-export const defaultSocialLogins = ['google', 'facebook', 'openid', 'github', 'discord', 'saml'];
+export const defaultSocialLogins = ['google', 'facebook', 'openid', 'solid', 'github', 'discord', 'saml'];
 
 export const defaultRetrievalModels = [
   'gpt-4o',

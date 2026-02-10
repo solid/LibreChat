@@ -62,10 +62,15 @@ router.get('/', async function (req, res) {
 
     const balanceConfig = getBalanceConfig(appConfig);
 
+    let socialLogins = appConfig?.registration?.socialLogins ?? defaultSocialLogins;
+    if (isSolidEnabled && !socialLogins.includes('solid')) {
+      socialLogins = [...socialLogins, 'solid'];
+    }
+
     /** @type {TStartupConfig} */
     const payload = {
       appTitle: process.env.APP_TITLE || 'LibreChat',
-      socialLogins: appConfig?.registration?.socialLogins ?? defaultSocialLogins,
+      socialLogins,
       discordLoginEnabled: !!process.env.DISCORD_CLIENT_ID && !!process.env.DISCORD_CLIENT_SECRET,
       facebookLoginEnabled:
         !!process.env.FACEBOOK_CLIENT_ID && !!process.env.FACEBOOK_CLIENT_SECRET,
