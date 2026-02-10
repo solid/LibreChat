@@ -53,36 +53,36 @@ async function saveMessage(req, params, metadata) {
     return;
   }
 
-  // Use Solid storage when user logged in via "Continue with Solid"
+  // Build shared payload once: messageId, expiredAt, tokenCount
+  let expiredAt = null;
+  if (req?.body?.isTemporary) {
+    try {
+      const appConfig = req.config;
+      expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+    } catch (err) {
+      logger.error('Error creating temporary chat expiration date:', err);
+      logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+    }
+  }
+  const messageId = params.newMessageId || params.messageId;
+  let tokenCount = params.tokenCount;
+  if (tokenCount != null && isNaN(tokenCount)) {
+    logger.warn(
+      `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${tokenCount}`,
+    );
+    logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+    tokenCount = 0;
+  }
+  const baseMessage = {
+    ...params,
+    messageId,
+    expiredAt,
+    tokenCount: tokenCount ?? 0,
+  };
+
   if (isSolidUser(req)) {
     try {
-      const messageData = {
-        ...params,
-        messageId: params.newMessageId || params.messageId,
-      };
-
-      if (req?.body?.isTemporary) {
-        try {
-          const appConfig = req.config;
-          messageData.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-        } catch (err) {
-          logger.error('Error creating temporary chat expiration date:', err);
-          logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-          messageData.expiredAt = null;
-        }
-      } else {
-        messageData.expiredAt = null;
-      }
-
-      if (messageData.tokenCount != null && isNaN(messageData.tokenCount)) {
-        logger.warn(
-          `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${messageData.tokenCount}`,
-        );
-        logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-        messageData.tokenCount = 0;
-      }
-
-      const savedMessage = await saveMessageToSolid(req, messageData, metadata);
+      const savedMessage = await saveMessageToSolid(req, baseMessage, metadata);
       return savedMessage;
     } catch (err) {
       logger.error('Error saving message to Solid Pod:', err);
@@ -91,35 +91,8 @@ async function saveMessage(req, params, metadata) {
     }
   }
 
-  
-  // MongoDB path for non-Solid users
   try {
-    const update = {
-      ...params,
-      user: req.user.id,
-      messageId: params.newMessageId || params.messageId,
-    };
-
-    if (req?.body?.isTemporary) {
-      try {
-        const appConfig = req.config;
-        update.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-      } catch (err) {
-        logger.error('Error creating temporary chat expiration date:', err);
-        logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-        update.expiredAt = null;
-      }
-    } else {
-      update.expiredAt = null;
-    }
-
-    if (update.tokenCount != null && isNaN(update.tokenCount)) {
-      logger.warn(
-        `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${update.tokenCount}`,
-      );
-      logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-      update.tokenCount = 0;
-    }
+    const update = { ...baseMessage, user: req.user.id };
     const message = await Message.findOneAndUpdate(
       { messageId: params.messageId, user: req.user.id },
       update,

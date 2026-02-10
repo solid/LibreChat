@@ -114,68 +114,46 @@ module.exports = {
    * @returns {Promise<TConversation>} The conversation object.
    */
   saveConvo: async (req, { conversationId, newConversationId, ...convo }, metadata) => {
-    // Use Solid storage when user logged in via "Continue with Solid"
+    if (metadata?.context) {
+      logger.debug(`[saveConvo] ${metadata.context}`);
+    }
+
+    // Build shared payload: expiredAt and base convo fields
+    let expiredAt = null;
+    if (req?.body?.isTemporary) {
+      try {
+        const appConfig = req.config;
+        expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+      } catch (err) {
+        logger.error('Error creating temporary chat expiration date:', err);
+        logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
+      }
+    }
+    const baseConvo = {
+      conversationId,
+      newConversationId,
+      ...convo,
+      expiredAt,
+    };
+
     if (isSolidUser(req)) {
       try {
-        if (metadata?.context) {
-          logger.debug(`[saveConvo] ${metadata.context}`);
-        }
-
-        const convoData = {
-          conversationId,
-          newConversationId,
-          ...convo,
-        };
-
-        if (req?.body?.isTemporary) {
-          try {
-            const appConfig = req.config;
-            convoData.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-          } catch (err) {
-            logger.error('Error creating temporary chat expiration date:', err);
-            logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
-            convoData.expiredAt = null;
-          }
-        } else {
-          convoData.expiredAt = null;
-        }
-
-        const savedConvo = await saveConvoToSolid(req, convoData, metadata);
+        const savedConvo = await saveConvoToSolid(req, baseConvo, metadata);
         return savedConvo;
       } catch (error) {
         logger.error('[saveConvo] Error saving conversation to Solid Pod', error);
         if (metadata && metadata?.context) {
           logger.info(`[saveConvo] ${metadata.context}`);
         }
-        // Solid users: surface error so UI can show "Save failed"
         throw error;
       }
     }
 
-    // MongoDB storage
     try {
-      if (metadata?.context) {
-        logger.debug(`[saveConvo] ${metadata.context}`);
-      }
-
       const messages = await getMessages({ conversationId }, '_id');
-      const update = { ...convo, messages, user: req.user.id };
-
+      const update = { ...convo, messages, user: req.user.id, expiredAt };
       if (newConversationId) {
         update.conversationId = newConversationId;
-      }
-
-      if (req?.body?.isTemporary) {
-        try {
-          const appConfig = req.config;
-          update.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-        } catch (err) {
-          logger.error('Error creating temporary chat expiration date:', err);
-          logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
-          update.expiredAt = null;
-        }
-      } else {
-        update.expiredAt = null;
       }
 
       /** @type {{ $set: Partial<TConversation>; $unset?: Record<keyof TConversation, number> }} */
@@ -184,14 +162,10 @@ module.exports = {
         updateOperation.$unset = metadata.unsetFields;
       }
 
-      /** Note: the resulting Model object is necessary for Meilisearch operations */
       const conversation = await Conversation.findOneAndUpdate(
         { conversationId, user: req.user.id },
         updateOperation,
-        {
-          new: true,
-          upsert: metadata?.noUpsert !== true,
-        },
+        { new: true, upsert: metadata?.noUpsert !== true },
       );
 
       if (!conversation) {
