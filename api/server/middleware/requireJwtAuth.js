@@ -16,7 +16,7 @@ const requireJwtAuth = (req, res, next) => {
   }
 
   // Default to standard JWT authentication
-  return passport.authenticate('jwt', { session: false }, (err, user, info) => {
+  return passport.authenticate('jwt', { session: false }, (err, user, _info) => {
     if (err) {
       return res.status(401).json({ error: 'Authentication failed', message: err.message });
     }

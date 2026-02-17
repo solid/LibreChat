@@ -633,7 +633,7 @@ const _LegacyAgentController = async (req, res, next, initializeClient, addTitle
     let response = await client.sendMessage(text, messageOptions);
 
     // Extract what we need and immediately break reference
-    const messageId = response.messageId;
+    const _messageId = response.messageId;
     const endpoint = endpointOption.endpoint;
     response.endpoint = endpoint;
 

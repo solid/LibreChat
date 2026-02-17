@@ -344,7 +344,7 @@ router.get('/:conversationId', validateMessageReq, async (req, res) => {
       try {
         const messages = await getMessagesFromSolid(req, conversationId);
         const cleanedMessages = messages.map((msg) => {
-          const { _id, __v, user, ...rest } = msg;
+          const { _id, __v, user: _user, ...rest } = msg;
           return rest;
         });
         return res.status(200).json(cleanedMessages);
