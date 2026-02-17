@@ -82,6 +82,7 @@ async function configureSolidOpenId(app) {
  */
 async function configureOpenId(app) {
   logger.info('Configuring OpenID Connect...');
+  const sessionExpiry = Number(process.env.SESSION_EXPIRY) || DEFAULT_SESSION_EXPIRY;
   const sessionOptions = {
     secret: process.env.SOLID_OPENID_SESSION_SECRET,
     resave: false,
