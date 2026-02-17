@@ -998,7 +998,7 @@ async function deleteMessagesFromSolid(req, params) {
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
 
     // Get messages container path
-    const messagesContainerPath = getMessagesContainerPath(podUrl, params.conversationId);
+    const _messagesContainerPath = getMessagesContainerPath(podUrl, params.conversationId);
 
     // Get all messages for the conversation
     const allMessages = await getMessagesFromSolid(req, params.conversationId);
