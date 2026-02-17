@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
       userId: req.user?.id,
       isSolidUser: isSolidUser(req),
     });
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Error fetching conversations',
       message: error.message, // Include actual error message for debugging
     });
@@ -69,13 +69,13 @@ router.get('/', async (req, res) => {
 
 router.get('/:conversationId', async (req, res) => {
   const { conversationId } = req.params;
-  
+
   logger.info('[GET /api/convos/:conversationId] Fetching conversation', {
     conversationId,
     userId: req.user?.id,
     isSolidUser: isSolidUser(req),
   });
-  
+
   try {
     const convo = await getConvo(req.user.id, conversationId, req);
 
@@ -166,8 +166,8 @@ router.delete('/', async (req, res) => {
   try {
     const dbResponse = await deleteConvos(req.user.id, filter, req); // Pass req for Solid storage support
     if (filter.conversationId) {
-          await deleteToolCalls(req.user.id, filter.conversationId);
-          await deleteConvoSharedLink(req.user.id, filter.conversationId, req);
+      await deleteToolCalls(req.user.id, filter.conversationId);
+      await deleteConvoSharedLink(req.user.id, filter.conversationId, req);
     }
     res.status(201).json(dbResponse);
   } catch (error) {

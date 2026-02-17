@@ -19,9 +19,7 @@ function parseLdpContainsFromTurtle(text, baseUrl) {
     .filter((q) => q.predicate.value === `${LDP_NS}contains`)
     .map((q) => q.object)
     .filter((obj) => obj && obj.termType === 'NamedNode')
-    .map((obj) =>
-      obj.value.startsWith('http') ? obj.value : new URL(obj.value, baseUrl).href
-    );
+    .map((obj) => (obj.value.startsWith('http') ? obj.value : new URL(obj.value, baseUrl).href));
 }
 const {
   getFile,
@@ -39,10 +37,10 @@ const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
 
 /**
  * Solid Storage Utility Module
- * 
+ *
  * This module provides functions to interact with Solid Pods for storing
  * and retrieving messages and conversations.
- * 
+ *
  * Storage Structure:
  * {podUrl}/librechat/
  *   ├── conversations/
@@ -54,7 +52,7 @@ const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
 
 /**
  * Get authenticated fetch function from Solid session
- * 
+ *
  * @param {Object} req - Express request object
  * @returns {Promise<Function>} Authenticated fetch function
  */
@@ -81,7 +79,7 @@ async function getSolidFetch(req) {
     let tokenSource = 'unknown';
 
     // Try to get access token from multiple sources (in order of preference)
-    
+
     // Source 1: Session (tokens stored during OAuth callback)
     const openidTokens = req.session?.openidTokens;
     if (openidTokens && openidTokens.accessToken) {
@@ -93,7 +91,7 @@ async function getSolidFetch(req) {
         isExpired: openidTokens.expiresAt ? Date.now() > openidTokens.expiresAt : 'unknown',
       });
     }
-    
+
     // Source 2: Cookies (fallback if session not available)
     if (!accessToken && req.cookies?.openid_access_token) {
       accessToken = req.cookies.openid_access_token;
@@ -102,7 +100,7 @@ async function getSolidFetch(req) {
         tokenLength: accessToken?.length,
       });
     }
-    
+
     // Source 3: User object tokenset (from OAuth callback - if stored in DB)
     if (!accessToken && req.user.tokenset && req.user.tokenset.access_token) {
       accessToken = req.user.tokenset.access_token;
@@ -111,7 +109,7 @@ async function getSolidFetch(req) {
         tokenLength: accessToken?.length,
       });
     }
-    
+
     // Source 4: User object federatedTokens (from OAuth callback - if stored in DB)
     if (!accessToken && req.user.federatedTokens && req.user.federatedTokens.access_token) {
       accessToken = req.user.federatedTokens.access_token;
@@ -140,7 +138,9 @@ async function getSolidFetch(req) {
         cookieKeys: req.cookies ? Object.keys(req.cookies) : [],
         allCookies: req.cookies ? Object.keys(req.cookies).join(', ') : 'none',
       });
-      throw new Error('No OpenID access token found. Make sure you logged in via Solid-OIDC and the session is maintained.');
+      throw new Error(
+        'No OpenID access token found. Make sure you logged in via Solid-OIDC and the session is maintained.',
+      );
     }
     logger.info('[SolidStorage] Access token retrieved', {
       tokenSource,
@@ -153,7 +153,7 @@ async function getSolidFetch(req) {
     const authenticatedFetch = async (url, options = {}) => {
       const headers = {
         ...options.headers,
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Content-Type': options.headers?.['Content-Type'] || 'application/json',
       };
 
@@ -209,7 +209,7 @@ async function getSolidFetch(req) {
 
 /**
  * Get user's Pod URL from their WebID
- * 
+ *
  * @param {string} webId - User's WebID
  * @param {Function} fetch - Authenticated fetch function
  * @returns {Promise<string>} Primary Pod URL
@@ -247,7 +247,7 @@ async function getPodUrl(webId, fetch) {
     // If no Pod URLs found, derive from WebID as fallback
     if (!podUrls || podUrls.length === 0) {
       logger.info('[SolidStorage] No Pod URLs found in profile, deriving from WebID', { webId });
-      
+
       // Extract base URL from WebID
       // WebID format: http://localhost:3000/bisi/profile/card#me
       // Pod URL format: http://localhost:3000/bisi/
@@ -256,8 +256,8 @@ async function getPodUrl(webId, fetch) {
         // Remove the fragment (#me) and path segments after the pod identifier
         // For most Solid servers, the Pod is at the root or one level deep
         // Pattern: http://host:port/podId/ -> Pod URL
-        const pathParts = webIdUrl.pathname.split('/').filter(p => p);
-        
+        const pathParts = webIdUrl.pathname.split('/').filter((p) => p);
+
         // If path contains 'profile', 'card', or similar, remove them
         // The Pod is usually at the base or one level up
         let podPath = '/';
@@ -269,14 +269,14 @@ async function getPodUrl(webId, fetch) {
             podPath = `/${podIdentifier}/`;
           }
         }
-        
+
         const derivedPodUrl = `${webIdUrl.protocol}//${webIdUrl.host}${podPath}`;
         logger.info('[SolidStorage] Derived Pod URL from WebID', {
           webId,
           derivedPodUrl,
           pathParts,
         });
-        
+
         // Verify the Pod URL is accessible by trying to fetch the root
         try {
           const response = await fetch(derivedPodUrl, {
@@ -296,7 +296,7 @@ async function getPodUrl(webId, fetch) {
             error: verifyError.message,
           });
         }
-        
+
         return derivedPodUrl;
       } catch (urlError) {
         logger.error('[SolidStorage] Failed to derive Pod URL from WebID', {
@@ -327,7 +327,7 @@ async function getPodUrl(webId, fetch) {
 
 /**
  * Get base storage path for LibreChat data in Pod
- * 
+ *
  * @param {string} podUrl - Pod URL
  * @returns {string} Base storage path
  */
@@ -339,7 +339,7 @@ function getBaseStoragePath(podUrl) {
 
 /**
  * Get conversation file path
- * 
+ *
  * @param {string} podUrl - Pod URL
  * @param {string} conversationId - Conversation ID
  * @returns {string} Conversation file path
@@ -352,7 +352,7 @@ function getConversationPath(podUrl, conversationId) {
 
 /**
  * Get messages container path for a conversation
- * 
+ *
  * @param {string} podUrl - Pod URL
  * @param {string} conversationId - Conversation ID
  * @returns {string} Messages container path
@@ -365,7 +365,7 @@ function getMessagesContainerPath(podUrl, conversationId) {
 
 /**
  * Get message file path
- * 
+ *
  * @param {string} podUrl - Pod URL
  * @param {string} conversationId - Conversation ID
  * @param {string} messageId - Message ID
@@ -379,7 +379,7 @@ function getMessagePath(podUrl, conversationId, messageId) {
 
 /**
  * Ensure container exists, create if it doesn't
- * 
+ *
  * @param {string} containerUrl - Container URL
  * @param {Function} fetch - Authenticated fetch function
  * @returns {Promise<void>}
@@ -393,31 +393,42 @@ async function ensureContainerExists(containerUrl, fetch) {
       const response = await fetch(containerUrl, {
         method: 'HEAD',
       });
-      
+
       if (response.ok || response.status === 200 || response.status === 405) {
         // Container exists (405 Method Not Allowed is also OK - means container exists but doesn't support HEAD)
-        logger.debug('[SolidStorage] Container already exists', { 
+        logger.debug('[SolidStorage] Container already exists', {
           containerUrl,
           status: response.status,
         });
         return;
       }
-      
+
       // If we get here, container might not exist
       if (response.status === 404) {
         throw new Error('Container not found');
       }
     } catch (error) {
       // Container doesn't exist, create it
-      if (error.status === 404 || error.message?.includes('404') || error.message?.includes('not found') || error.message?.includes('Container not found')) {
+      if (
+        error.status === 404 ||
+        error.message?.includes('404') ||
+        error.message?.includes('not found') ||
+        error.message?.includes('Container not found')
+      ) {
         logger.info('[SolidStorage] Container does not exist, creating', { containerUrl });
         try {
           await createContainerAt(containerUrl, { fetch });
           logger.info('[SolidStorage] Container created successfully', { containerUrl });
         } catch (createError) {
           // If creation fails with 409, container already exists (race condition)
-          if (createError.status === 409 || createError.message?.includes('409') || createError.message?.includes('already exists')) {
-            logger.debug('[SolidStorage] Container already exists (race condition)', { containerUrl });
+          if (
+            createError.status === 409 ||
+            createError.message?.includes('409') ||
+            createError.message?.includes('already exists')
+          ) {
+            logger.debug('[SolidStorage] Container already exists (race condition)', {
+              containerUrl,
+            });
             return;
           }
           throw createError;
@@ -444,7 +455,7 @@ async function ensureContainerExists(containerUrl, fetch) {
 
 /**
  * Ensure base storage structure exists
- * 
+ *
  * @param {string} podUrl - Pod URL
  * @param {Function} fetch - Authenticated fetch function
  * @returns {Promise<void>}
@@ -519,7 +530,7 @@ async function saveMessageToSolid(req, messageDocument, metadata) {
     const messagePath = getMessagePath(
       podUrl,
       messageDocument.conversationId,
-      messageDocument.messageId
+      messageDocument.messageId,
     );
 
     const messageJson = JSON.stringify(messageDocument, null, 2);
@@ -587,7 +598,7 @@ async function saveMessageToSolid(req, messageDocument, metadata) {
 
 /**
  * Get all messages for a conversation from Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {string} conversationId - Conversation ID
  * @returns {Promise<Array>} Array of message objects, sorted by createdAt
@@ -626,10 +637,10 @@ async function getMessagesFromSolid(req, conversationId) {
       const response = await authenticatedFetch(messagesContainerPath, {
         method: 'GET',
         headers: {
-          'Accept': 'text/turtle, application/ld+json, */*',
+          Accept: 'text/turtle, application/ld+json, */*',
         },
       });
-      
+
       if (response.status === 404) {
         // Container doesn't exist, return empty array
         logger.info('[SolidStorage] Messages container does not exist, returning empty array', {
@@ -637,11 +648,13 @@ async function getMessagesFromSolid(req, conversationId) {
         });
         return [];
       }
-      
+
       if (!response.ok) {
-        throw new Error(`Failed to get container contents: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Failed to get container contents: ${response.status} ${response.statusText}`,
+        );
       }
-      
+
       // Parse the response with N3 (Solid containers return Turtle RDF with ldp:contains)
       const text = await response.text();
       const containedUrls = parseLdpContainsFromTurtle(text, messagesContainerPath);
@@ -652,11 +665,11 @@ async function getMessagesFromSolid(req, conversationId) {
         const url = item.url || '';
         return url.endsWith('.json') && !url.endsWith('.meta.json');
       });
-      
+
       logger.debug('[SolidStorage] Found message files', {
         conversationId,
         fileCount: messageFiles.length,
-        files: messageFiles.map(f => f.url),
+        files: messageFiles.map((f) => f.url),
       });
     } catch (error) {
       if (error.status === 404 || error.message?.includes('404')) {
@@ -744,7 +757,7 @@ async function getMessagesFromSolid(req, conversationId) {
 
 /**
  * Update an existing message in Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {Object} messageData - Message data to update
  * @param {string} messageData.messageId - Message ID (required)
@@ -785,25 +798,28 @@ async function updateMessageInSolid(req, messageData, metadata) {
 
     // If conversationId is not provided, we need to find it from the existing message
     if (!conversationId) {
-      logger.warn('[SolidStorage] conversationId not provided in update, searching for message in Pod', {
-        messageId: messageData.messageId,
-        updateFields: Object.keys(messageData),
-      });
-      
+      logger.warn(
+        '[SolidStorage] conversationId not provided in update, searching for message in Pod',
+        {
+          messageId: messageData.messageId,
+          updateFields: Object.keys(messageData),
+        },
+      );
+
       // Search for the message across all conversation message containers
       // We'll check the messages container for all conversation subdirectories
       const basePath = getBaseStoragePath(podUrl);
       const messagesContainerPath = `${basePath}messages/`;
-      
+
       try {
         // Get list of all conversation directories in messages container
         const response = await authenticatedFetch(messagesContainerPath, {
           method: 'GET',
           headers: {
-            'Accept': 'text/turtle, application/ld+json, */*',
+            Accept: 'text/turtle, application/ld+json, */*',
           },
         });
-        
+
         if (response.ok) {
           const text = await response.text();
           const containedUrls = parseLdpContainsFromTurtle(text, messagesContainerPath);
@@ -814,18 +830,18 @@ async function updateMessageInSolid(req, messageData, metadata) {
             messageId: messageData.messageId,
             directoryCount: allItems.length,
           });
-          
+
           // Search each conversation directory for the message
           for (const conversationDir of allItems) {
             try {
               const messageFileUrl = `${conversationDir}${messageData.messageId}.json`;
               const fileResponse = await authenticatedFetch(messageFileUrl, { method: 'HEAD' });
-              
+
               if (fileResponse.ok) {
                 // Found the message! Extract conversationId from the directory path
                 // Format: .../messages/{conversationId}/
                 const pathParts = conversationDir.split('/');
-                const conversationIdIndex = pathParts.findIndex(part => part === 'messages') + 1;
+                const conversationIdIndex = pathParts.findIndex((part) => part === 'messages') + 1;
                 if (conversationIdIndex > 0 && pathParts[conversationIdIndex]) {
                   conversationId = pathParts[conversationIdIndex];
                   logger.info('[SolidStorage] Found conversationId from message location', {
@@ -859,10 +875,12 @@ async function updateMessageInSolid(req, messageData, metadata) {
           stack: searchError.stack,
         });
       }
-      
+
       // If we still don't have conversationId, throw error
       if (!conversationId) {
-        const error = new Error('conversationId is required for updating messages. Could not find message in Pod to determine conversationId.');
+        const error = new Error(
+          'conversationId is required for updating messages. Could not find message in Pod to determine conversationId.',
+        );
         logger.error('[SolidStorage] Failed to find conversationId for message update', {
           messageId: messageData.messageId,
           updateFields: Object.keys(messageData),
@@ -950,7 +968,7 @@ async function updateMessageInSolid(req, messageData, metadata) {
 
 /**
  * Delete messages from Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {Object} params - Delete parameters
  * @param {string} params.conversationId - Conversation ID (required)
@@ -1019,7 +1037,11 @@ async function deleteMessagesFromSolid(req, params) {
       });
     }
     // Case 2: Delete specific message IDs
-    else if (params.messageIds && Array.isArray(params.messageIds) && params.messageIds.length > 0) {
+    else if (
+      params.messageIds &&
+      Array.isArray(params.messageIds) &&
+      params.messageIds.length > 0
+    ) {
       messagesToDelete = allMessages.filter((msg) => params.messageIds.includes(msg.messageId));
       logger.debug('[SolidStorage] Filtering specific message IDs', {
         requestedIds: params.messageIds.length,
@@ -1046,7 +1068,7 @@ async function deleteMessagesFromSolid(req, params) {
     for (const message of messagesToDelete) {
       try {
         const messagePath = getMessagePath(podUrl, params.conversationId, message.messageId);
-        
+
         logger.debug('[SolidStorage] Deleting message file', {
           messagePath,
           messageId: message.messageId,
@@ -1172,7 +1194,8 @@ async function saveConvoToSolid(req, convoDocument, metadata) {
 
     convoDocument.messages = messageRefs;
     convoDocument.updatedAt = new Date().toISOString();
-    convoDocument.createdAt = convoDocument.createdAt || existingConversation?.createdAt || new Date().toISOString();
+    convoDocument.createdAt =
+      convoDocument.createdAt || existingConversation?.createdAt || new Date().toISOString();
 
     const previousConversationId = convoDocument.previousConversationId;
     delete convoDocument.previousConversationId;
@@ -1247,7 +1270,7 @@ async function saveConvoToSolid(req, convoDocument, metadata) {
 
 /**
  * Get a single conversation from Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {string} conversationId - Conversation ID
  * @returns {Promise<Object|null>} Conversation object or null if not found
@@ -1305,13 +1328,17 @@ async function getConvoFromSolid(req, conversationId) {
         });
         return null;
       }
-      
-      if (conversationUserId && typeof conversationUserId === 'object' && conversationUserId.toString) {
+
+      if (
+        conversationUserId &&
+        typeof conversationUserId === 'object' &&
+        conversationUserId.toString
+      ) {
         conversationUserId = conversationUserId.toString();
       } else {
         conversationUserId = String(conversationUserId || '');
       }
-      
+
       let currentUserId = req.user.id;
       if (!currentUserId) {
         logger.error('[SolidStorage] Request has no user ID - RETURNING NULL', {
@@ -1321,17 +1348,17 @@ async function getConvoFromSolid(req, conversationId) {
         });
         return null;
       }
-      
+
       if (currentUserId && typeof currentUserId === 'object' && currentUserId.toString) {
         currentUserId = currentUserId.toString();
       } else {
         currentUserId = String(currentUserId || '');
       }
-      
+
       // Trim whitespace and compare
       conversationUserId = conversationUserId.trim();
       currentUserId = currentUserId.trim();
-      
+
       logger.info('[SolidStorage] Comparing user IDs in getConvoFromSolid', {
         conversationId,
         conversationUserIdRaw: conversationData.user,
@@ -1344,10 +1371,10 @@ async function getConvoFromSolid(req, conversationId) {
         conversationUserIdLength: conversationUserId.length,
         currentUserIdLength: currentUserId.length,
         areEqual: conversationUserId === currentUserId,
-        conversationUserIdCharCodes: conversationUserId.split('').map(c => c.charCodeAt(0)),
-        currentUserIdCharCodes: currentUserId.split('').map(c => c.charCodeAt(0)),
+        conversationUserIdCharCodes: conversationUserId.split('').map((c) => c.charCodeAt(0)),
+        currentUserIdCharCodes: currentUserId.split('').map((c) => c.charCodeAt(0)),
       });
-      
+
       if (conversationUserId !== currentUserId) {
         logger.error('[SolidStorage] Conversation belongs to different user - RETURNING NULL', {
           conversationId,
@@ -1360,8 +1387,8 @@ async function getConvoFromSolid(req, conversationId) {
           conversationUserIdLength: conversationUserId.length,
           currentUserIdLength: currentUserId.length,
           areEqual: conversationUserId === currentUserId,
-          conversationUserIdCharCodes: conversationUserId.split('').map(c => c.charCodeAt(0)),
-          currentUserIdCharCodes: currentUserId.split('').map(c => c.charCodeAt(0)),
+          conversationUserIdCharCodes: conversationUserId.split('').map((c) => c.charCodeAt(0)),
+          currentUserIdCharCodes: currentUserId.split('').map((c) => c.charCodeAt(0)),
         });
         return null;
       }
@@ -1370,10 +1397,10 @@ async function getConvoFromSolid(req, conversationId) {
       if (!conversationData.model || !conversationData.endpoint) {
         try {
           const messages = await getMessagesFromSolid(req, conversationId);
-          
+
           // Find the first message with a model (usually the AI response)
-          const messageWithModel = messages.find(msg => msg.model && msg.endpoint);
-          
+          const messageWithModel = messages.find((msg) => msg.model && msg.endpoint);
+
           if (messageWithModel) {
             if (!conversationData.model && messageWithModel.model) {
               logger.info('[SolidStorage] Extracting model from messages', {
@@ -1382,7 +1409,7 @@ async function getConvoFromSolid(req, conversationId) {
               });
               conversationData.model = messageWithModel.model;
             }
-            
+
             if (!conversationData.endpoint && messageWithModel.endpoint) {
               logger.info('[SolidStorage] Extracting endpoint from messages', {
                 conversationId,
@@ -1432,7 +1459,7 @@ async function getConvoFromSolid(req, conversationId) {
 
 /**
  * Get conversations with cursor-based pagination from Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {Object} options - Query options
  * @param {string} [options.cursor] - Base64-encoded cursor for pagination
@@ -1502,38 +1529,44 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       const response = await authenticatedFetch(conversationsContainerPath, {
         method: 'GET',
         headers: {
-          'Accept': 'text/turtle, application/ld+json, */*',
+          Accept: 'text/turtle, application/ld+json, */*',
         },
       });
-      
+
       if (response.status === 404) {
         // Container doesn't exist, return empty result
-        logger.info('[SolidStorage] Conversations container does not exist (404), returning empty array', {
-          conversationsContainerPath,
-        });
+        logger.info(
+          '[SolidStorage] Conversations container does not exist (404), returning empty array',
+          {
+            conversationsContainerPath,
+          },
+        );
         return { conversations: [], nextCursor: null };
       }
-      
+
       if (!response.ok) {
-        throw new Error(`Failed to get container contents: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Failed to get container contents: ${response.status} ${response.statusText}`,
+        );
       }
-      
+
       // Parse with N3 (Solid containers return Turtle RDF with ldp:contains)
       const text = await response.text();
       const containedUrls = parseLdpContainsFromTurtle(text, conversationsContainerPath);
       containerContents = containedUrls.map((url) => ({ url }));
-      
+
       logger.debug('[SolidStorage] Container contents retrieved', {
         conversationsContainerPath,
         itemCount: containerContents.length,
-        items: containerContents.map(c => c.url),
+        items: containerContents.map((c) => c.url),
       });
     } catch (error) {
       // Log full error details for debugging
       const errorMessage = error?.message || String(error) || 'Unknown error';
-      const errorStatus = error?.status || error?.statusCode || error?.response?.status || 'no status';
+      const errorStatus =
+        error?.status || error?.statusCode || error?.response?.status || 'no status';
       const errorName = error?.name || 'Unknown';
-      
+
       logger.warn('[SolidStorage] Error getting container contents', {
         conversationsContainerPath,
         errorMessage,
@@ -1546,36 +1579,42 @@ async function getConvosByCursorFromSolid(req, options = {}) {
         responseStatus: error?.response?.status,
         responseStatusText: error?.response?.statusText,
       });
-      
+
       // Check if error is a 404 (container doesn't exist)
-      const isNotFound = 
-        errorStatus === 404 || 
+      const isNotFound =
+        errorStatus === 404 ||
         errorStatus === '404' ||
-        errorMessage?.includes('404') || 
+        errorMessage?.includes('404') ||
         errorMessage?.includes('Not Found') ||
         errorMessage?.toLowerCase().includes('not found') ||
         errorMessage?.toLowerCase().includes('404');
-      
+
       if (isNotFound) {
         // Container doesn't exist, return empty result (this is expected for new users)
-        logger.info('[SolidStorage] Conversations container does not exist (404), returning empty array', {
-          conversationsContainerPath,
-          errorStatus,
-          errorMessage,
-        });
+        logger.info(
+          '[SolidStorage] Conversations container does not exist (404), returning empty array',
+          {
+            conversationsContainerPath,
+            errorStatus,
+            errorMessage,
+          },
+        );
         return { conversations: [], nextCursor: null };
       }
-      
+
       // Log unexpected errors but don't throw - return empty array instead
       // This prevents fallback to MongoDB when user is logged in via "Continue with Solid"
-      logger.warn('[SolidStorage] Unexpected error getting container contents, returning empty array', {
-        conversationsContainerPath,
-        errorMessage,
-        errorName,
-        errorStatus,
-        errorStack: error?.stack,
-      });
-      
+      logger.warn(
+        '[SolidStorage] Unexpected error getting container contents, returning empty array',
+        {
+          conversationsContainerPath,
+          errorMessage,
+          errorName,
+          errorStatus,
+          errorStack: error?.stack,
+        },
+      );
+
       // Return empty array instead of throwing to avoid MongoDB fallback
       return { conversations: [], nextCursor: null };
     }
@@ -1625,9 +1664,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
     if (isArchived) {
       filtered = filtered.filter((convo) => convo.isArchived === true);
     } else {
-      filtered = filtered.filter(
-        (convo) => !convo.isArchived || convo.isArchived === false,
-      );
+      filtered = filtered.filter((convo) => !convo.isArchived || convo.isArchived === false);
     }
 
     // Filter by tags
@@ -1666,19 +1703,22 @@ async function getConvosByCursorFromSolid(req, options = {}) {
         const op = finalSortDirection === 'asc' ? 'gt' : 'lt';
 
         filtered = filtered.filter((convo) => {
-          const convoPrimary = finalSortBy === 'title' ? convo[finalSortBy] : new Date(convo[finalSortBy]);
+          const convoPrimary =
+            finalSortBy === 'title' ? convo[finalSortBy] : new Date(convo[finalSortBy]);
           const convoSecondary = new Date(convo.updatedAt);
 
           if (op === 'gt') {
             return (
               convoPrimary > primaryValue ||
-              (convoPrimary.getTime && convoPrimary.getTime() === primaryValue.getTime() &&
+              (convoPrimary.getTime &&
+                convoPrimary.getTime() === primaryValue.getTime() &&
                 convoSecondary > secondaryValue)
             );
           } else {
             return (
               convoPrimary < primaryValue ||
-              (convoPrimary.getTime && convoPrimary.getTime() === primaryValue.getTime() &&
+              (convoPrimary.getTime &&
+                convoPrimary.getTime() === primaryValue.getTime() &&
                 convoSecondary < secondaryValue)
             );
           }
@@ -1732,7 +1772,8 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       limited.pop(); // Remove extra item used to detect next page
       const lastReturned = limited[limited.length - 1];
       const primaryValue = lastReturned[finalSortBy];
-      const primaryStr = finalSortBy === 'title' ? primaryValue : new Date(primaryValue).toISOString();
+      const primaryStr =
+        finalSortBy === 'title' ? primaryValue : new Date(primaryValue).toISOString();
       const secondaryStr = new Date(lastReturned.updatedAt).toISOString();
       const composite = { primary: primaryStr, secondary: secondaryStr };
       nextCursor = Buffer.from(JSON.stringify(composite)).toString('base64');
@@ -1776,7 +1817,7 @@ async function getConvosByCursorFromSolid(req, options = {}) {
 
 /**
  * Delete conversations from Solid Pod
- * 
+ *
  * @param {Object} req - Express request object
  * @param {Array<string>} conversationIds - Array of conversation IDs to delete
  * @returns {Promise<number>} Number of conversations deleted
@@ -1832,18 +1873,18 @@ async function deleteConvosFromSolid(req, conversationIds) {
           const messagesDeleted = await deleteMessagesFromSolid(req, {
             conversationId,
           });
-          
+
           logger.info('[SolidStorage] Messages deleted for conversation', {
             conversationId,
             messagesDeleted,
           });
-          
+
           if (messagesDeleted === 0) {
             logger.warn('[SolidStorage] No messages were deleted - this may indicate an issue', {
               conversationId,
             });
           }
-          
+
           // Also try to delete the messages container directory if it's empty
           // This is optional - some Solid servers handle empty containers automatically
           try {
@@ -1858,11 +1899,14 @@ async function deleteConvosFromSolid(req, conversationIds) {
               });
             } catch (containerError) {
               // It's okay if we can't delete the container - the files are already deleted
-              logger.debug('[SolidStorage] Could not delete messages container (may not be empty or not allowed)', {
-                conversationId,
-                messagesContainerPath,
-                error: containerError.message,
-              });
+              logger.debug(
+                '[SolidStorage] Could not delete messages container (may not be empty or not allowed)',
+                {
+                  conversationId,
+                  messagesContainerPath,
+                  error: containerError.message,
+                },
+              );
             }
           } catch (containerPathError) {
             // Ignore errors when trying to delete the container
@@ -1872,11 +1916,14 @@ async function deleteConvosFromSolid(req, conversationIds) {
             });
           }
         } catch (error) {
-          logger.error('[SolidStorage] Error deleting messages for conversation - THIS IS A PROBLEM', {
-            conversationId,
-            error: error.message,
-            stack: error.stack,
-          });
+          logger.error(
+            '[SolidStorage] Error deleting messages for conversation - THIS IS A PROBLEM',
+            {
+              conversationId,
+              error: error.message,
+              stack: error.stack,
+            },
+          );
           // Continue with conversation deletion even if messages fail
         }
 
@@ -1990,7 +2037,12 @@ async function fetchAcl(aclUrl, fetchFn) {
     return await response.text();
   } catch (error) {
     // Treat 404 and 403 as "no ACL exists"
-    if (error.status === 404 || error.status === 403 || error.message?.includes('404') || error.message?.includes('403')) {
+    if (
+      error.status === 404 ||
+      error.status === 403 ||
+      error.message?.includes('404') ||
+      error.message?.includes('403')
+    ) {
       return null;
     }
     throw error;
@@ -2017,51 +2069,53 @@ function hasPublicAccessInAcl(aclTurtle) {
 async function createPublicAcl(resourceUrl, aclUrl, isContainer = false, ownerWebId = null) {
   const { namedNode, blankNode, quad } = DataFactory;
   const quads = [];
-  
+
   // If owner WebID is provided, create Authorization for owner with full permissions
   if (ownerWebId) {
     const ownerAuthNode = blankNode('ownerAuth');
-    
+
     // Authorization: type
-    quads.push(quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
-    
+    quads.push(
+      quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)),
+    );
+
     // Authorization: agent (the owner)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}agent`), namedNode(ownerWebId)));
-    
+
     // Authorization: accessTo (the resource)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
-    
+
     // If this is a container, also add default access for resources within it
     if (isContainer) {
       quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
     }
-    
+
     // Authorization: mode (Write, Append, Control for owner)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Write`)));
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Append`)));
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Control`)));
   }
-  
+
   // Create Authorization for public access
   const authNode = blankNode('publicAuth');
-  
+
   // Authorization: type
   quads.push(quad(authNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
-  
+
   // Authorization: agentClass (foaf:Agent = anyone/public)
   quads.push(quad(authNode, namedNode(`${ACL_NS}agentClass`), namedNode(`${FOAF_NS}Agent`)));
-  
+
   // Authorization: accessTo (the resource)
   quads.push(quad(authNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
-  
+
   // If this is a container, also add default access for resources within it
   if (isContainer) {
     quads.push(quad(authNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
   }
-  
+
   // Authorization: mode (Read access)
   quads.push(quad(authNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Read`)));
-  
+
   // Convert quads to Turtle using N3 Writer
   return new Promise((resolve, reject) => {
     const writer = new Writer({ prefixes: { acl: ACL_NS, rdf: RDF_NS, foaf: FOAF_NS } });
@@ -2082,37 +2136,45 @@ async function createPublicAcl(resourceUrl, aclUrl, isContainer = false, ownerWe
  * @param {string} [ownerWebId] - Optional owner WebID to ensure full permissions
  * @returns {Promise<string>} The updated ACL Turtle content
  */
-async function updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, isContainer = false, ownerWebId = null) {
+async function updateAclWithPublicAccess(
+  existingTurtle,
+  aclUrl,
+  resourceUrl,
+  isContainer = false,
+  ownerWebId = null,
+) {
   const { namedNode, blankNode, quad } = DataFactory;
   const quads = [];
-  
+
   // Check if owner permissions exist in the existing ACL
   const hasOwnerPermissions = ownerWebId && existingTurtle.includes(ownerWebId);
-  
+
   // If owner WebID is provided and owner permissions don't exist, add them
   if (ownerWebId && !hasOwnerPermissions) {
     const ownerAuthNode = blankNode('ownerAuth');
-    
+
     // Authorization: type
-    quads.push(quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
-    
+    quads.push(
+      quad(ownerAuthNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)),
+    );
+
     // Authorization: agent (the owner)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}agent`), namedNode(ownerWebId)));
-    
+
     // Authorization: accessTo (the resource)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
-    
+
     // If this is a container, also add default access for resources within it
     if (isContainer) {
       quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
     }
-    
+
     // Authorization: mode (Write, Append, Control for owner)
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Write`)));
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Append`)));
     quads.push(quad(ownerAuthNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Control`)));
   }
-  
+
   // Check if public access already exists
   if (hasPublicAccessInAcl(existingTurtle)) {
     // If we added owner permissions, combine them with existing ACL
@@ -2129,20 +2191,20 @@ async function updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, is
     }
     return existingTurtle; // Public access already exists, no changes needed
   }
-  
+
   // Create Authorization for public access
   const authNode = blankNode('publicAuth');
   quads.push(quad(authNode, namedNode(`${RDF_NS}type`), namedNode(`${ACL_NS}Authorization`)));
   quads.push(quad(authNode, namedNode(`${ACL_NS}agentClass`), namedNode(`${FOAF_NS}Agent`)));
   quads.push(quad(authNode, namedNode(`${ACL_NS}accessTo`), namedNode(resourceUrl)));
-  
+
   // If this is a container, also add default access for resources within it
   if (isContainer) {
     quads.push(quad(authNode, namedNode(`${ACL_NS}default`), namedNode(resourceUrl)));
   }
-  
+
   quads.push(quad(authNode, namedNode(`${ACL_NS}mode`), namedNode(`${ACL_NS}Read`)));
-  
+
   // Convert new quads to Turtle
   const newTurtle = await new Promise((resolve, reject) => {
     const writer = new Writer({ prefixes: { acl: ACL_NS, rdf: RDF_NS, foaf: FOAF_NS } });
@@ -2152,7 +2214,7 @@ async function updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, is
       else resolve(result);
     });
   });
-  
+
   // Combine existing and new Turtle
   return existingTurtle + '\n' + newTurtle;
 }
@@ -2182,7 +2244,7 @@ async function grantPublicReadAccess(resourceUrl, fetchFn, isContainer = false, 
       aclUrl = resourceUrl + '.acl';
     }
   }
-  
+
   // Fetch existing ACL or create new one
   // If we get 403, treat it as "no ACL exists" and create a new one
   let existingTurtle = null;
@@ -2196,17 +2258,23 @@ async function grantPublicReadAccess(resourceUrl, fetchFn, isContainer = false, 
     });
     existingTurtle = null;
   }
-  
+
   let turtle;
-  
+
   if (existingTurtle) {
     // Update existing ACL with public access and ensure owner permissions
-    turtle = await updateAclWithPublicAccess(existingTurtle, aclUrl, resourceUrl, isContainer, ownerWebId);
+    turtle = await updateAclWithPublicAccess(
+      existingTurtle,
+      aclUrl,
+      resourceUrl,
+      isContainer,
+      ownerWebId,
+    );
   } else {
     // Create new ACL with public access and owner permissions
     turtle = await createPublicAcl(resourceUrl, aclUrl, isContainer, ownerWebId);
   }
-  
+
   // Save ACL - even if we got 403 before, we should be able to PUT the ACL file
   const response = await fetchFn(aclUrl, {
     method: 'PUT',
@@ -2215,12 +2283,12 @@ async function grantPublicReadAccess(resourceUrl, fetchFn, isContainer = false, 
     },
     body: turtle,
   });
-  
+
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
     throw new Error(`Failed to save ACL: ${response.status} ${response.statusText} - ${errorText}`);
   }
-  
+
   logger.debug('[SolidStorage] ACL file created/updated successfully', {
     aclUrl,
     resourceUrl,
@@ -2237,38 +2305,41 @@ async function grantPublicReadAccess(resourceUrl, fetchFn, isContainer = false, 
  */
 async function removePublicReadAccess(resourceUrl, fetchFn) {
   const aclUrl = await getAclUrl(resourceUrl, fetchFn);
-  
+
   // Fetch existing ACL
   const existingTurtle = await fetchAcl(aclUrl, fetchFn);
-  
+
   if (!existingTurtle) {
     // No ACL exists, nothing to remove
     return;
   }
-  
+
   // Check if public access exists
   if (!hasPublicAccessInAcl(existingTurtle)) {
     // Public access doesn't exist, nothing to remove
     return;
   }
-  
+
   // Remove public access lines from Turtle
   // This is a simple approach - remove lines containing foaf:Agent
   const lines = existingTurtle.split('\n');
   const filteredLines = [];
   let skipNext = false;
   let inPublicAuth = false;
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    
+
     // Detect start of public authorization (blank node with foaf:Agent)
-    if (line.includes('foaf:Agent') && (line.includes('acl:agentClass') || line.includes('acl:Authorization'))) {
+    if (
+      line.includes('foaf:Agent') &&
+      (line.includes('acl:agentClass') || line.includes('acl:Authorization'))
+    ) {
       inPublicAuth = true;
       skipNext = true;
       continue;
     }
-    
+
     // Skip lines that are part of the public authorization
     if (inPublicAuth) {
       if (line.trim().endsWith('.') && !line.includes('foaf:Agent')) {
@@ -2277,21 +2348,24 @@ async function removePublicReadAccess(resourceUrl, fetchFn) {
       }
       continue;
     }
-    
+
     // Skip lines that are clearly part of public auth block
-    if (skipNext && (line.includes('acl:accessTo') || line.includes('acl:mode') || line.includes('acl:Read'))) {
+    if (
+      skipNext &&
+      (line.includes('acl:accessTo') || line.includes('acl:mode') || line.includes('acl:Read'))
+    ) {
       if (line.trim().endsWith('.')) {
         skipNext = false;
       }
       continue;
     }
-    
+
     skipNext = false;
     filteredLines.push(line);
   }
-  
+
   const updatedTurtle = filteredLines.join('\n');
-  
+
   // Save updated ACL (or delete if empty)
   if (updatedTurtle.trim().length === 0) {
     // Delete ACL file if it's empty
@@ -2313,10 +2387,12 @@ async function removePublicReadAccess(resourceUrl, fetchFn) {
       },
       body: updatedTurtle,
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to save ACL: ${response.status} ${response.statusText} - ${errorText}`);
+      throw new Error(
+        `Failed to save ACL: ${response.status} ${response.statusText} - ${errorText}`,
+      );
     }
   }
 }
@@ -2324,7 +2400,7 @@ async function removePublicReadAccess(resourceUrl, fetchFn) {
 /**
  * Set public read access for a shared conversation and its messages
  * This makes the conversation and all its messages publicly accessible
- * 
+ *
  * @param {Object} req - Express request object
  * @param {string} conversationId - The conversation ID to share
  * @returns {Promise<void>}
@@ -2407,7 +2483,6 @@ async function setPublicAccessForShare(req, conversationId) {
     // IMPORTANT: We must preserve owner permissions so the owner can still add messages
     const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
     try {
-      
       await grantPublicReadAccess(messagesContainerPath, authenticatedFetch, true, ownerWebId); // isContainer=true, ownerWebId
       logger.info('[SolidStorage] Public read access set on messages container (with default)', {
         messagesContainerPath,
@@ -2428,7 +2503,7 @@ async function setPublicAccessForShare(req, conversationId) {
     for (const message of messages) {
       try {
         const messagePath = getMessagePath(podUrl, conversationId, message.messageId);
-      
+
         try {
           await grantPublicReadAccess(messagePath, authenticatedFetch, false, ownerWebId);
           messagesShared++;
@@ -2440,10 +2515,10 @@ async function setPublicAccessForShare(req, conversationId) {
             messageId: message.messageId,
             error: grantError.message,
           });
-          
+
           const aclUrl = messagePath.endsWith('/') ? messagePath + '.acl' : messagePath + '.acl';
           const turtle = await createPublicAcl(messagePath, aclUrl, false, ownerWebId);
-          
+
           const response = await authenticatedFetch(aclUrl, {
             method: 'PUT',
             headers: {
@@ -2451,7 +2526,7 @@ async function setPublicAccessForShare(req, conversationId) {
             },
             body: turtle,
           });
-          
+
           if (response.ok) {
             logger.info('[SolidStorage] ACL file created directly for message file', {
               messagePath,
@@ -2460,7 +2535,9 @@ async function setPublicAccessForShare(req, conversationId) {
             messagesShared++;
           } else {
             const errorText = await response.text().catch(() => response.statusText);
-            throw new Error(`Failed to create ACL directly: ${response.status} ${response.statusText} - ${errorText}`);
+            throw new Error(
+              `Failed to create ACL directly: ${response.status} ${response.statusText} - ${errorText}`,
+            );
           }
         }
       } catch (error) {
@@ -2492,7 +2569,7 @@ async function setPublicAccessForShare(req, conversationId) {
 /**
  * Remove public read access for a shared conversation and its messages
  * This unshares the conversation and makes it private again
- * 
+ *
  * @param {Object} req - Express request object
  * @param {string} conversationId - The conversation ID to unshare
  * @returns {Promise<void>}
@@ -2580,10 +2657,13 @@ async function removePublicAccessForShare(req, conversationId) {
     try {
       messages = await getMessagesFromSolid(req, conversationId);
     } catch (error) {
-      logger.debug('[SolidStorage] Could not fetch messages when removing public access (conversation may be deleted)', {
-        conversationId,
-        error: error.message,
-      });
+      logger.debug(
+        '[SolidStorage] Could not fetch messages when removing public access (conversation may be deleted)',
+        {
+          conversationId,
+          error: error.message,
+        },
+      );
     }
 
     // Remove public read access from each message file using manual Turtle approach
@@ -2632,7 +2712,7 @@ async function removePublicAccessForShare(req, conversationId) {
 
 /**
  * Get shared messages from Solid Pod using public access (no authentication required)
- * 
+ *
  * @param {string} shareId - The share ID
  * @param {string} conversationId - The conversation ID (from SharedLink)
  * @param {string} podUrl - The Pod URL where the conversation is stored
@@ -2674,13 +2754,13 @@ async function getSharedMessagesFromSolid(shareId, conversationId, podUrl, targe
     // Get all messages for this conversation using public access
     const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
     let messages = [];
-    
+
     try {
       // Try to get container contents
       const containerResponse = await publicFetch(messagesContainerPath, {
         method: 'GET',
         headers: {
-          'Accept': 'text/turtle',
+          Accept: 'text/turtle',
         },
       });
 
@@ -2693,7 +2773,9 @@ async function getSharedMessagesFromSolid(shareId, conversationId, podUrl, targe
           });
           return null;
         }
-        throw new Error(`Failed to fetch messages container: ${containerResponse.status} ${containerResponse.statusText}`);
+        throw new Error(
+          `Failed to fetch messages container: ${containerResponse.status} ${containerResponse.statusText}`,
+        );
       }
 
       const containerText = await containerResponse.text();
@@ -2745,7 +2827,7 @@ async function getSharedMessagesFromSolid(shareId, conversationId, podUrl, targe
     let messagesToShare = messages;
     if (targetMessageId) {
       // Find the target message and get all messages up to it
-      const targetIndex = messages.findIndex(msg => msg.messageId === targetMessageId);
+      const targetIndex = messages.findIndex((msg) => msg.messageId === targetMessageId);
       if (targetIndex >= 0) {
         messagesToShare = messages.slice(0, targetIndex + 1);
       } else {

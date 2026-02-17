@@ -94,9 +94,9 @@ describe('Graph Token Utilities', () => {
     });
 
     it('should return false for non-object values', () => {
-      expect(recordContainsGraphTokenPlaceholder('string' as unknown as Record<string, string>)).toBe(
-        false,
-      );
+      expect(
+        recordContainsGraphTokenPlaceholder('string' as unknown as Record<string, string>),
+      ).toBe(false);
     });
   });
 
@@ -242,7 +242,9 @@ describe('Graph Token Utilities', () => {
     it('should return original value when graph token exchange fails', async () => {
       mockExtractOpenIDTokenInfo.mockReturnValue({ accessToken: 'access-token' });
       mockIsOpenIDTokenValid.mockReturnValue(true);
-      const failingResolver: GraphTokenResolver = jest.fn().mockRejectedValue(new Error('Exchange failed'));
+      const failingResolver: GraphTokenResolver = jest
+        .fn()
+        .mockRejectedValue(new Error('Exchange failed'));
 
       const value = 'Bearer {{LIBRECHAT_GRAPH_ACCESS_TOKEN}}';
       const result = await resolveGraphTokenPlaceholder(value, {

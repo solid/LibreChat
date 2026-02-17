@@ -21,9 +21,10 @@ const requireJwtAuth = (req, res, next) => {
       return res.status(401).json({ error: 'Authentication failed', message: err.message });
     }
     if (!user) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Authentication required',
-        message: 'No valid JWT token found. Make sure you are logged in and the Authorization header is sent.',
+        message:
+          'No valid JWT token found. Make sure you are logged in and the Authorization header is sent.',
         hint: 'Access this endpoint via the frontend app, or include Authorization: Bearer <token> header',
       });
     }

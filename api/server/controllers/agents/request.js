@@ -316,8 +316,8 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
             textLength: response.text?.length || 0,
             hasContent: !!response.content,
             contentLength: Array.isArray(response.content) ? response.content.length : 0,
-            contentTypes: Array.isArray(response.content) 
-              ? response.content.map(c => c?.type).filter(Boolean)
+            contentTypes: Array.isArray(response.content)
+              ? response.content.map((c) => c?.type).filter(Boolean)
               : [],
           });
           await saveMessage(
@@ -337,7 +337,7 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
           // Emit the final event to all subscribers
           GenerationJobManager.emitDone(streamId, finalEvent);
           await decrementPendingRequest(userId);
-          
+
           // Complete the job AFTER emitting FINAL and saving messages
           // This ensures the frontend receives the FINAL event while the job is still active
           GenerationJobManager.completeJob(streamId);

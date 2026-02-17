@@ -64,7 +64,9 @@ async function customFetch(url, options) {
     const response = await undici.fetch(url, fetchOptions);
 
     if (debugOpenId) {
-      logger.debug(`[SolidOpenidStrategy] Response status: ${response.status} ${response.statusText}`);
+      logger.debug(
+        `[SolidOpenidStrategy] Response status: ${response.status} ${response.statusText}`,
+      );
       logger.debug(`[SolidOpenidStrategy] Response headers: ${logHeaders(response.headers)}`);
     }
 
@@ -367,7 +369,11 @@ async function setupSolidOpenId() {
           // TODO: jeswr - Potentially fetch an email from the user's WebID if they have a `foaf:mbox`
           // TODO: jeswr - Can codebase support email or WebID rather than requiring email?
           // TODO: jeswr - Suggest opening issues for these once we PR the changes upstream
-          const email = userinfo.email || userinfo.preferred_username || userinfo.upn || `${userinfo.webid}@FAKEDOMAIN.TLD`;
+          const email =
+            userinfo.email ||
+            userinfo.preferred_username ||
+            userinfo.upn ||
+            `${userinfo.webid}@FAKEDOMAIN.TLD`;
           if (!isEmailDomainAllowed(email, appConfig?.registration?.allowedDomains)) {
             logger.error(
               `[SolidOpenidStrategy] Authentication blocked - email domain not allowed [Email: ${email}]`,

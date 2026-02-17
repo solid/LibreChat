@@ -100,15 +100,20 @@ router.get('/link/:conversationId', requireJwtAuth, async (req, res) => {
 router.post('/:conversationId', requireJwtAuth, async (req, res) => {
   try {
     const { targetMessageId } = req.body;
-    
+
     // Check if createSharedLink exists
     if (typeof createSharedLink !== 'function') {
       logger.error('[share route] createSharedLink is not a function');
       return res.status(500).json({ message: 'Share service not available' });
     }
-    
-    const created = await createSharedLink(req.user.id, req.params.conversationId, targetMessageId, req);
-    
+
+    const created = await createSharedLink(
+      req.user.id,
+      req.params.conversationId,
+      targetMessageId,
+      req,
+    );
+
     if (created) {
       res.status(200).json(created);
     } else {

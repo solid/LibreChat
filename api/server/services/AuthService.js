@@ -488,7 +488,7 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         refreshToken: refreshToken || null, // Store null if no refresh token
         expiresAt: expirationDate.getTime(),
       };
-      
+
       // Explicitly save the session to ensure it persists
       req.session.save((err) => {
         if (err) {
@@ -500,7 +500,7 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
           logger.debug('[setOpenIDAuthTokens] Session saved successfully');
         }
       });
-      
+
       logger.info('[setOpenIDAuthTokens] Tokens stored in session', {
         hasAccessToken: !!tokenset.access_token,
         hasRefreshToken: !!refreshToken,

@@ -150,6 +150,6 @@ export function useActiveJobs(enabled = true) {
     refetchInterval: (data) => ((data?.activeJobIds?.length ?? 0) > 0 ? 5_000 : false),
     retry: false,
   });
-  
+
   return query;
 }
