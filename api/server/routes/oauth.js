@@ -51,7 +51,7 @@ const oauthHandler = async (req, res, next) => {
         hasAccessToken: !!req.user.tokenset.access_token,
         hasRefreshToken: !!req.user.tokenset.refresh_token,
       });
-      
+
       // Also create JWT tokens for frontend authentication
       // OPENID_REUSE_TOKENS determines if we use OpenID JWT or standard JWT
       if (isEnabled(process.env.OPENID_REUSE_TOKENS) === true) {
@@ -147,7 +147,7 @@ router.get('/openid', (req, res, next) => {
  */
 const logAuthorizationCode = (req, res, next) => {
   const { code, state, error } = req.query;
-  
+
   if (code) {
     logger.info('[OpenID Callback] Authorization code received from Solid provider', {
       authorizationCode: code,
@@ -171,7 +171,7 @@ const logAuthorizationCode = (req, res, next) => {
       queryParams: req.query,
     });
   }
-  
+
   next();
 };
 

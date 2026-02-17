@@ -267,7 +267,7 @@ async function updateMessage(req, message, metadata) {
   if (isSolidUser(req)) {
     try {
       const updatedMessage = await updateMessageInSolid(req, message, metadata);
-      
+
       return {
         messageId: updatedMessage.messageId,
         conversationId: updatedMessage.conversationId,

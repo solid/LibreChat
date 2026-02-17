@@ -58,41 +58,61 @@ export default function createPayload(submission: t.TSubmission) {
    * missing optional fields. Convert null → undefined so schema parse succeeds.
    */
   const nullableNumberFields = [
-    'topP', 'top_p', 'topK', 'frequency_penalty', 'presence_penalty', 
-    'temperature', 'maxOutputTokens', 'maxContextTokens', 'max_tokens',
-    'thinkingBudget', 'fileTokenLimit'
+    'topP',
+    'top_p',
+    'topK',
+    'frequency_penalty',
+    'presence_penalty',
+    'temperature',
+    'maxOutputTokens',
+    'maxContextTokens',
+    'max_tokens',
+    'thinkingBudget',
+    'fileTokenLimit',
   ];
-  
+
   const nullableStringFields = [
-    'assistant_id', 'agent_id', 'model', 'modelLabel', 'userLabel',
-    'promptPrefix', 'system', 'context', 'title', 'conversationId',
-    'endpoint', 'endpointType', 'parentMessageId', 'artifacts',
-    'imageDetail', 'reasoning_effort', 'reasoning_summary', 'verbosity'
+    'assistant_id',
+    'agent_id',
+    'model',
+    'modelLabel',
+    'userLabel',
+    'promptPrefix',
+    'system',
+    'context',
+    'title',
+    'conversationId',
+    'endpoint',
+    'endpointType',
+    'parentMessageId',
+    'artifacts',
+    'imageDetail',
+    'reasoning_effort',
+    'reasoning_summary',
+    'verbosity',
   ];
-  
-  const nullableBooleanFields = [
-    'isArchived', 'promptCache', 'thinking', 'stream', 'resendFiles'
-  ];
-  
+
+  const nullableBooleanFields = ['isArchived', 'promptCache', 'thinking', 'stream', 'resendFiles'];
+
   // Convert null to undefined for all nullable fields
   for (const field of nullableNumberFields) {
     if (field in normalizedConversation && normalizedConversation[field] === null) {
       normalizedConversation[field] = undefined;
     }
   }
-  
+
   for (const field of nullableStringFields) {
     if (field in normalizedConversation && normalizedConversation[field] === null) {
       normalizedConversation[field] = undefined;
     }
   }
-  
+
   for (const field of nullableBooleanFields) {
     if (field in normalizedConversation && normalizedConversation[field] === null) {
       normalizedConversation[field] = undefined;
     }
   }
-  
+
   // Handle createdAt and updatedAt - convert Date objects to strings, or null to undefined
   if ('createdAt' in normalizedConversation) {
     if (normalizedConversation.createdAt === null) {
@@ -101,7 +121,7 @@ export default function createPayload(submission: t.TSubmission) {
       normalizedConversation.createdAt = normalizedConversation.createdAt.toISOString();
     }
   }
-  
+
   if ('updatedAt' in normalizedConversation) {
     if (normalizedConversation.updatedAt === null) {
       normalizedConversation.updatedAt = undefined;
@@ -109,7 +129,7 @@ export default function createPayload(submission: t.TSubmission) {
       normalizedConversation.updatedAt = normalizedConversation.updatedAt.toISOString();
     }
   }
-  
+
   /**
    * Use safeParse so we don't throw on invalid/conversation shapes (e.g. from Solid).
    * If parse fails, we still try to build a valid payload from conversation + endpointOption
@@ -120,23 +140,24 @@ export default function createPayload(submission: t.TSubmission) {
   if (!parseResult.success) {
     // Fallback: build payload from raw conversationId and conversation/endpointOption fields
     // (e.g. new convo: conversationId null/'new'; existing: we need conversationId + model etc.)
-    const conversationIdRaw = conversation?.conversationId ?? normalizedConversation?.conversationId ?? null;
-    
+    const conversationIdRaw =
+      conversation?.conversationId ?? normalizedConversation?.conversationId ?? null;
+
     // Allow null or 'new' for new conversations
     if (conversationIdRaw === null || conversationIdRaw === 'new') {
       const conversationId = conversationIdRaw;
-  const { endpoint: _e, endpointType } = endpointOption as {
-    endpoint: s.EModelEndpoint;
-    endpointType?: s.EModelEndpoint;
-  };
+      const { endpoint: _e, endpointType } = endpointOption as {
+        endpoint: s.EModelEndpoint;
+        endpointType?: s.EModelEndpoint;
+      };
 
-  const endpoint = _e as s.EModelEndpoint;
-  let server = `${EndpointURLs[s.EModelEndpoint.agents]}/${endpoint}`;
-  if (s.isAssistantsEndpoint(endpoint)) {
-    server =
-      EndpointURLs[(endpointType ?? endpoint) as 'assistants' | 'azureAssistants'] +
-      (isEdited ? '/modify' : '');
-  }
+      const endpoint = _e as s.EModelEndpoint;
+      let server = `${EndpointURLs[s.EModelEndpoint.agents]}/${endpoint}`;
+      if (s.isAssistantsEndpoint(endpoint)) {
+        server =
+          EndpointURLs[(endpointType ?? endpoint) as 'assistants' | 'azureAssistants'] +
+          (isEdited ? '/modify' : '');
+      }
 
       const payload: t.TPayload = {
         ...userMessage,
@@ -153,35 +174,70 @@ export default function createPayload(submission: t.TSubmission) {
 
       return { server, payload };
     }
-    
+
     // For existing conversations, conversationId must be a valid string
     if (typeof conversationIdRaw !== 'string') {
       throw new Error('Invalid conversation: conversationId must be a string');
     }
 
     const conversationId: string = conversationIdRaw;
-    
+
     // Solid often stores model (and other options) on the conversation; pull from conversation
     // when not in endpointOption so the payload has a model for the backend.
     const conversationFields = {
-      model: (endpointOption as { model?: string })?.model ?? conversation?.model ?? normalizedConversation?.model,
-      modelLabel: (endpointOption as { modelLabel?: string })?.modelLabel ?? conversation?.modelLabel ?? normalizedConversation?.modelLabel,
-      temperature: (endpointOption as { temperature?: number })?.temperature ?? conversation?.temperature ?? normalizedConversation?.temperature,
-      topP: (endpointOption as { topP?: number })?.topP ?? conversation?.topP ?? normalizedConversation?.topP,
-      top_p: (endpointOption as { top_p?: number })?.top_p ?? conversation?.top_p ?? normalizedConversation?.top_p,
-      frequency_penalty: (endpointOption as { frequency_penalty?: number })?.frequency_penalty ?? conversation?.frequency_penalty ?? normalizedConversation?.frequency_penalty,
-      presence_penalty: (endpointOption as { presence_penalty?: number })?.presence_penalty ?? conversation?.presence_penalty ?? normalizedConversation?.presence_penalty,
-      maxOutputTokens: (endpointOption as { maxOutputTokens?: number })?.maxOutputTokens ?? conversation?.maxOutputTokens ?? normalizedConversation?.maxOutputTokens,
-      max_tokens: (endpointOption as { max_tokens?: number })?.max_tokens ?? conversation?.max_tokens ?? normalizedConversation?.max_tokens,
-      system: (endpointOption as { system?: string })?.system ?? conversation?.system ?? normalizedConversation?.system,
-      promptPrefix: (endpointOption as { promptPrefix?: string })?.promptPrefix ?? conversation?.promptPrefix ?? normalizedConversation?.promptPrefix,
+      model:
+        (endpointOption as { model?: string })?.model ??
+        conversation?.model ??
+        normalizedConversation?.model,
+      modelLabel:
+        (endpointOption as { modelLabel?: string })?.modelLabel ??
+        conversation?.modelLabel ??
+        normalizedConversation?.modelLabel,
+      temperature:
+        (endpointOption as { temperature?: number })?.temperature ??
+        conversation?.temperature ??
+        normalizedConversation?.temperature,
+      topP:
+        (endpointOption as { topP?: number })?.topP ??
+        conversation?.topP ??
+        normalizedConversation?.topP,
+      top_p:
+        (endpointOption as { top_p?: number })?.top_p ??
+        conversation?.top_p ??
+        normalizedConversation?.top_p,
+      frequency_penalty:
+        (endpointOption as { frequency_penalty?: number })?.frequency_penalty ??
+        conversation?.frequency_penalty ??
+        normalizedConversation?.frequency_penalty,
+      presence_penalty:
+        (endpointOption as { presence_penalty?: number })?.presence_penalty ??
+        conversation?.presence_penalty ??
+        normalizedConversation?.presence_penalty,
+      maxOutputTokens:
+        (endpointOption as { maxOutputTokens?: number })?.maxOutputTokens ??
+        conversation?.maxOutputTokens ??
+        normalizedConversation?.maxOutputTokens,
+      max_tokens:
+        (endpointOption as { max_tokens?: number })?.max_tokens ??
+        conversation?.max_tokens ??
+        normalizedConversation?.max_tokens,
+      system:
+        (endpointOption as { system?: string })?.system ??
+        conversation?.system ??
+        normalizedConversation?.system,
+      promptPrefix:
+        (endpointOption as { promptPrefix?: string })?.promptPrefix ??
+        conversation?.promptPrefix ??
+        normalizedConversation?.promptPrefix,
     };
-    
+
     // Filter out null/undefined values
     const validConversationFields = Object.fromEntries(
-      Object.entries(conversationFields).filter(([_, value]) => value !== null && value !== undefined)
+      Object.entries(conversationFields).filter(
+        ([_, value]) => value !== null && value !== undefined,
+      ),
     );
-    
+
     // Continue with the fallback conversationId
     const { endpoint: _e, endpointType } = endpointOption as {
       endpoint: s.EModelEndpoint;
@@ -197,16 +253,25 @@ export default function createPayload(submission: t.TSubmission) {
     }
 
     // Ensure model is explicitly included - check all sources
-    const finalModel = (endpointOption as { model?: string })?.model || 
-                      validConversationFields.model || 
-                      conversation?.model || 
-                      normalizedConversation?.model;
+    const finalModel =
+      (endpointOption as { model?: string })?.model ||
+      validConversationFields.model ||
+      conversation?.model ||
+      normalizedConversation?.model;
 
     // Extract resendFiles - default to true for agents endpoints if not specified
     const resendFilesFromOption = (endpointOption as { resendFiles?: boolean })?.resendFiles;
-    const resendFilesFromConversation = typeof conversation?.resendFiles === 'boolean' ? conversation.resendFiles : undefined;
-    const resendFilesFromNormalized = typeof normalizedConversation?.resendFiles === 'boolean' ? normalizedConversation.resendFiles as boolean : undefined;
-    const resendFiles: boolean = resendFilesFromOption ?? resendFilesFromConversation ?? resendFilesFromNormalized ?? (s.isAgentsEndpoint(endpoint) ? true : false);
+    const resendFilesFromConversation =
+      typeof conversation?.resendFiles === 'boolean' ? conversation.resendFiles : undefined;
+    const resendFilesFromNormalized =
+      typeof normalizedConversation?.resendFiles === 'boolean'
+        ? (normalizedConversation.resendFiles as boolean)
+        : undefined;
+    const resendFiles: boolean =
+      resendFilesFromOption ??
+      resendFilesFromConversation ??
+      resendFilesFromNormalized ??
+      (s.isAgentsEndpoint(endpoint) ? true : false);
 
     const payload: t.TPayload = {
       ...userMessage,
@@ -249,9 +314,17 @@ export default function createPayload(submission: t.TSubmission) {
 
   // Extract resendFiles - default to true for agents endpoints if not specified
   const resendFilesFromOption = (endpointOption as { resendFiles?: boolean })?.resendFiles;
-  const resendFilesFromConversation = typeof conversation?.resendFiles === 'boolean' ? conversation.resendFiles : undefined;
-  const resendFilesFromNormalized = typeof normalizedConversation?.resendFiles === 'boolean' ? normalizedConversation.resendFiles as boolean : undefined;
-  const resendFiles: boolean = resendFilesFromOption ?? resendFilesFromConversation ?? resendFilesFromNormalized ?? (s.isAgentsEndpoint(endpoint) ? true : false);
+  const resendFilesFromConversation =
+    typeof conversation?.resendFiles === 'boolean' ? conversation.resendFiles : undefined;
+  const resendFilesFromNormalized =
+    typeof normalizedConversation?.resendFiles === 'boolean'
+      ? (normalizedConversation.resendFiles as boolean)
+      : undefined;
+  const resendFiles: boolean =
+    resendFilesFromOption ??
+    resendFilesFromConversation ??
+    resendFilesFromNormalized ??
+    (s.isAgentsEndpoint(endpoint) ? true : false);
 
   const payload: t.TPayload = {
     ...userMessage,

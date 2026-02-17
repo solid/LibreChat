@@ -42,11 +42,10 @@ router.get('/', async (req, res) => {
     const sortOrder = sortDirection === 'asc' ? 1 : -1;
 
     if (conversationId && messageId) {
-     
       if (isSolidUser(req)) {
         try {
           const allMessages = await getMessagesFromSolid(req, conversationId);
-          const message = allMessages.find(m => m.messageId === messageId);
+          const message = allMessages.find((m) => m.messageId === messageId);
           response = { messages: message ? [message] : [], nextCursor: null };
         } catch (error) {
           logger.error('Error getting message from Solid Pod', error);
@@ -69,23 +68,23 @@ router.get('/', async (req, res) => {
       if (isSolidUser(req)) {
         try {
           const allMessages = await getMessagesFromSolid(req, conversationId);
-          
+
           // Apply sorting
           allMessages.sort((a, b) => {
             const aVal = a[sortField] || 0;
             const bVal = b[sortField] || 0;
             return sortOrder === 1 ? aVal - bVal : bVal - aVal;
           });
-          
+
           // Apply cursor filtering if provided
           let filteredMessages = allMessages;
           if (cursor) {
-            filteredMessages = allMessages.filter(msg => {
+            filteredMessages = allMessages.filter((msg) => {
               const msgVal = msg[sortField] || 0;
               return sortOrder === 1 ? msgVal > cursor : msgVal < cursor;
             });
           }
-          
+
           // Apply pagination
           const messages = filteredMessages.slice(0, pageSize + 1);
           let nextCursor = null;
@@ -340,12 +339,11 @@ router.post('/artifact/:messageId', async (req, res) => {
 router.get('/:conversationId', validateMessageReq, async (req, res) => {
   try {
     const { conversationId } = req.params;
-    
 
     if (isSolidUser(req)) {
       try {
         const messages = await getMessagesFromSolid(req, conversationId);
-        const cleanedMessages = messages.map(msg => {
+        const cleanedMessages = messages.map((msg) => {
           const { _id, __v, user, ...rest } = msg;
           return rest;
         });

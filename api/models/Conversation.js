@@ -18,7 +18,7 @@ const {
  */
 const searchConversation = async (conversationId, req = null) => {
   try {
-    // Solid users: use Solid storage only; no MongoDB fallback 
+    // Solid users: use Solid storage only; no MongoDB fallback
     if (isSolidUser(req)) {
       const convo = await getConvoFromSolid(req, conversationId);
       if (convo) {
@@ -45,7 +45,7 @@ const searchConversation = async (conversationId, req = null) => {
  * @returns {Promise<TConversation>} The conversation object.
  */
 const getConvo = async (user, conversationId, req = null) => {
-  // Solid users: use Solid storage only; no MongoDB fallback 
+  // Solid users: use Solid storage only; no MongoDB fallback
   if (isSolidUser(req)) {
     const convo = await getConvoFromSolid(req, conversationId);
     return convo ?? null;
@@ -223,7 +223,6 @@ module.exports = {
       req, // Optional req object for Solid storage
     } = {},
   ) => {
-
     if (isSolidUser(req)) {
       return await getConvosByCursorFromSolid(req, {
         cursor,
@@ -431,16 +430,16 @@ module.exports = {
 
           // Filter conversations based on the filter criteria
           let filteredConversations = allConversations.conversations;
-          
+
           if (filter.conversationId) {
             filteredConversations = filteredConversations.filter(
-              (c) => c.conversationId === filter.conversationId
+              (c) => c.conversationId === filter.conversationId,
             );
           }
-          
+
           if (filter.endpoint) {
             filteredConversations = filteredConversations.filter(
-              (c) => c.endpoint === filter.endpoint
+              (c) => c.endpoint === filter.endpoint,
             );
           }
 

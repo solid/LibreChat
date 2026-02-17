@@ -75,7 +75,9 @@ const refreshController = async (req, res) => {
 
     if (!refreshToken) {
       // Solid provider may not provide refresh tokens - fall back to standard JWT refresh
-      logger.warn('[refreshController] No OpenID refresh token available, falling back to standard refresh');
+      logger.warn(
+        '[refreshController] No OpenID refresh token available, falling back to standard refresh',
+      );
       // Fall through to standard refresh logic below
     } else {
       // We have a refresh token, use OpenID refresh flow
