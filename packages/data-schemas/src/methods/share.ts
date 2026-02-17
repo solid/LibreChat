@@ -5,6 +5,10 @@ import type { SchemaWithMeiliMethods } from '~/models/plugins/mongoMeili';
 import type * as t from '~/types';
 import logger from '~/config/winston';
 
+// Solid storage and auth helpers – required at runtime when share methods run in api server context
+const getSolidStorage = () => require('~/server/services/SolidStorage');
+const getIsSolidUser = () => require('~/server/utils/isSolidUser').isSolidUser;
+
 class ShareServiceError extends Error {
   code: string;
   constructor(message: string, code: string) {
@@ -173,7 +177,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       if (share.podUrl) {
         // Get shared messages from Solid Pod
         try {
-          const { getSharedMessagesFromSolid } = require('~/server/services/SolidStorage');
+          const { getSharedMessagesFromSolid } = getSolidStorage();
           const solidShare = await getSharedMessagesFromSolid(
             shareId,
             share.conversationId,
@@ -205,12 +209,11 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
             conversationId: share.conversationId,
             podUrl: share.podUrl,
           });
-          // Fall through to return null if Solid fetch fails
           return null;
         }
       }
 
-      // MongoDB share - use existing logic
+      // MongoDB share - use existing logic (separate query with populate to get messages)
       const shareWithMessages = (await SharedLink.findOne({ shareId, isPublic: true })
         .populate({
           path: 'messages',
@@ -380,12 +383,11 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       
       // If any shares are Solid shares, remove public access (user logged in via "Continue with Solid")
       if (req) {
-        const { isSolidUser } = require('~/server/utils/isSolidUser');
-        if (isSolidUser(req)) {
+        if (getIsSolidUser()(req)) {
           const solidShares = shares.filter(share => share.podUrl);
           for (const share of solidShares) {
             try {
-              const { removePublicAccessForShare } = require('~/server/services/SolidStorage');
+              const { removePublicAccessForShare } = getSolidStorage();
               await removePublicAccessForShare(req, conversationId);
               logger.info('[deleteConvoSharedLink] Public access removed for Solid share', {
                 shareId: share.shareId,
@@ -438,12 +440,11 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       const Conversation = mongoose.models.Conversation as SchemaWithMeiliMethods;
 
       // Check if this is a Solid user (logged in via "Continue with Solid")
-      const { isSolidUser } = require('~/server/utils/isSolidUser');
       let conversation;
       let conversationMessages;
       let podUrl: string | undefined;
 
-      if (isSolidUser(req)) {
+      if (req && getIsSolidUser()(req)) {
         logger.info('[createSharedLink] Detected Solid user, using Solid storage path');
         // Check for existing share first (same as MongoDB)
         const existingShare = (await SharedLink.findOne({
@@ -483,9 +484,8 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
             getConvoFromSolid,
             getMessagesFromSolid,
             getPodUrl,
-            setPublicAccessForShare,
             getSolidFetch,
-          } = require('~/server/services/SolidStorage');
+          } = getSolidStorage();
           const authenticatedFetch = await getSolidFetch(req);
           
           // Get Pod URL
@@ -631,7 +631,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
         ...(targetMessageId && { targetMessageId }),
       };
 
-      if (isSolidUser && podUrl) {
+      if (podUrl) {
         sharedLinkData.podUrl = podUrl;
         // For Solid, we don't store message ObjectIds, but we still need the array for schema compatibility
         sharedLinkData.messages = [];
@@ -643,9 +643,9 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       await SharedLink.create(sharedLinkData);
 
       // For Solid users, set public access on conversation and messages
-      if (isSolidUser && req) {
+      if (req && podUrl) {
         try {
-          const { setPublicAccessForShare } = require('~/server/services/SolidStorage');
+          const { setPublicAccessForShare } = getSolidStorage();
           await setPublicAccessForShare(req, conversationId);
           logger.info('[createSharedLink] Public access set for Solid share', {
             shareId,
@@ -789,7 +789,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       // If this is a Solid share, remove public access before deleting
       if (share.podUrl && req) {
         try {
-          const { removePublicAccessForShare } = require('~/server/services/SolidStorage');
+          const { removePublicAccessForShare } = getSolidStorage();
           await removePublicAccessForShare(req, share.conversationId);
           logger.info('[deleteSharedLink] Public access removed for Solid share', {
             shareId,
