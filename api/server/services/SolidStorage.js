@@ -1,6 +1,28 @@
 const { logger } = require('@librechat/data-schemas');
 const fetch = require('node-fetch');
-const { DataFactory, Writer } = require('n3');
+const { DataFactory, Writer, Parser } = require('n3');
+
+// LDP (Linked Data Platform) namespace for parsing container Turtle responses
+const LDP_NS = 'http://www.w3.org/ns/ldp#';
+
+/**
+ * Parse Turtle RDF and extract all ldp:contains object URLs.
+ * Uses N3 parser instead of regex for correct handling of Turtle format.
+ * @param {string} text - Raw Turtle response body
+ * @param {string} baseUrl - Base IRI for resolving relative URLs
+ * @returns {string[]} Absolute URLs of contained resources
+ */
+function parseLdpContainsFromTurtle(text, baseUrl) {
+  const parser = new Parser({ baseIRI: baseUrl });
+  const quads = parser.parse(text);
+  return quads
+    .filter((q) => q.predicate.value === `${LDP_NS}contains`)
+    .map((q) => q.object)
+    .filter((obj) => obj && obj.termType === 'NamedNode')
+    .map((obj) =>
+      obj.value.startsWith('http') ? obj.value : new URL(obj.value, baseUrl).href
+    );
+}
 const {
   getFile,
   saveFileInContainer,
@@ -620,31 +642,11 @@ async function getMessagesFromSolid(req, conversationId) {
         throw new Error(`Failed to get container contents: ${response.status} ${response.statusText}`);
       }
       
-      // Parse the response (Solid containers return Turtle format)
-      // Format: ldp:contains <item1>, <item2>, <item3>.
+      // Parse the response with N3 (Solid containers return Turtle RDF with ldp:contains)
       const text = await response.text();
-      
-      // Parse Turtle format to extract all items from ldp:contains
-      // Handle both single and comma-separated items
-      const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
-      const allItems = [];
-      let match;
-      
-      while ((match = ldpContainsPattern.exec(text)) !== null) {
-        // Extract all URLs from the matched group (handles comma-separated items)
-        const itemsString = match[1];
-        const itemPattern = /<([^>]+)>/g;
-        let itemMatch;
-        while ((itemMatch = itemPattern.exec(itemsString)) !== null) {
-          const itemUrl = itemMatch[1];
-          // Convert relative URLs to absolute URLs
-          const absoluteUrl = itemUrl.startsWith('http') 
-            ? itemUrl 
-            : new URL(itemUrl, messagesContainerPath).href;
-          allItems.push({ url: absoluteUrl });
-        }
-      }
-      
+      const containedUrls = parseLdpContainsFromTurtle(text, messagesContainerPath);
+      const allItems = containedUrls.map((url) => ({ url }));
+
       // Filter for JSON files only
       messageFiles = allItems.filter((item) => {
         const url = item.url || '';
@@ -804,27 +806,10 @@ async function updateMessageInSolid(req, messageData, metadata) {
         
         if (response.ok) {
           const text = await response.text();
-          // Parse Turtle format to extract conversation directories
-          const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
-          const allItems = [];
-          let match;
-          
-          while ((match = ldpContainsPattern.exec(text)) !== null) {
-            const itemsString = match[1];
-            const itemPattern = /<([^>]+)>/g;
-            let itemMatch;
-            while ((itemMatch = itemPattern.exec(itemsString)) !== null) {
-              const itemUrl = itemMatch[1];
-              // Only include directories (ending with /)
-              if (itemUrl.endsWith('/')) {
-                const absoluteUrl = itemUrl.startsWith('http') 
-                  ? itemUrl 
-                  : new URL(itemUrl, messagesContainerPath).href;
-                allItems.push(absoluteUrl);
-              }
-            }
-          }
-          
+          const containedUrls = parseLdpContainsFromTurtle(text, messagesContainerPath);
+          // Only include directories (ending with /)
+          const allItems = containedUrls.filter((url) => url.endsWith('/'));
+
           logger.debug('[SolidStorage] Searching for message across conversation directories', {
             messageId: messageData.messageId,
             directoryCount: allItems.length,
@@ -1533,33 +1518,10 @@ async function getConvosByCursorFromSolid(req, options = {}) {
         throw new Error(`Failed to get container contents: ${response.status} ${response.statusText}`);
       }
       
-      // Parse the response as text (Solid containers return Turtle format)
-      // Format: ldp:contains <item1>, <item2>, <item3>.
+      // Parse with N3 (Solid containers return Turtle RDF with ldp:contains)
       const text = await response.text();
-      
-      // Parse Turtle format to extract all items from ldp:contains
-      // Handle both single and comma-separated items: ldp:contains <item1>, <item2>.
-      // TODO: Use RDF object mapper to parse this.
-      const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
-      const allItems = [];
-      let match;
-      
-      while ((match = ldpContainsPattern.exec(text)) !== null) {
-        // Extract all URLs from the matched group (handles comma-separated items)
-        const itemsString = match[1];
-        const itemPattern = /<([^>]+)>/g;
-        let itemMatch;
-        while ((itemMatch = itemPattern.exec(itemsString)) !== null) {
-          const itemUrl = itemMatch[1];
-          // Convert relative URLs to absolute URLs
-          const absoluteUrl = itemUrl.startsWith('http') 
-            ? itemUrl 
-            : new URL(itemUrl, conversationsContainerPath).href;
-          allItems.push({ url: absoluteUrl });
-        }
-      }
-      
-      containerContents = allItems;
+      const containedUrls = parseLdpContainsFromTurtle(text, conversationsContainerPath);
+      containerContents = containedUrls.map((url) => ({ url }));
       
       logger.debug('[SolidStorage] Container contents retrieved', {
         conversationsContainerPath,
@@ -2735,24 +2697,8 @@ async function getSharedMessagesFromSolid(shareId, conversationId, podUrl, targe
       }
 
       const containerText = await containerResponse.text();
-      
-      // Parse Turtle format to extract all items from ldp:contains
-      const ldpContainsPattern = /ldp:contains\s+((?:<[^>]+>(?:\s*,\s*<[^>]+>)*))/g;
-      const allItems = [];
-      let match;
-      
-      while ((match = ldpContainsPattern.exec(containerText)) !== null) {
-        const itemsString = match[1];
-        const itemPattern = /<([^>]+)>/g;
-        let itemMatch;
-        while ((itemMatch = itemPattern.exec(itemsString)) !== null) {
-          const itemUrl = itemMatch[1];
-          const absoluteUrl = itemUrl.startsWith('http') 
-            ? itemUrl 
-            : new URL(itemUrl, messagesContainerPath).href;
-          allItems.push({ url: absoluteUrl });
-        }
-      }
+      const containedUrls = parseLdpContainsFromTurtle(containerText, messagesContainerPath);
+      const allItems = containedUrls.map((url) => ({ url }));
 
       // Filter for JSON files only
       const containerContents = allItems.filter((item) => {
