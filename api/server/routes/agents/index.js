@@ -270,7 +270,6 @@ router.post('/chat/abort', async (req, res) => {
 });
 
 const chatRouter = express.Router();
-
 chatRouter.use(configMiddleware);
 
 if (isEnabled(LIMIT_MESSAGE_IP)) {

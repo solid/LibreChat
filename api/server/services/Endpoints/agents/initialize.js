@@ -152,31 +152,6 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
     throw new Error('Agent not found');
   }
 
-  // If agent doesn't have a model, try to get it from multiple sources
-  // This is especially important for Solid storage where the model might be in the conversation
-  if (!primaryAgent.model) {
-    // Try multiple sources for the model
-    const modelFromEndpointOption = 
-      endpointOption.model || 
-      endpointOption.model_parameters?.model ||
-      req.body?.model ||
-      req.body?.model_parameters?.model;
-    
-    if (modelFromEndpointOption) {
-      logger.info('[initializeClient] Setting model from endpointOption/request body', {
-        agentId: primaryAgent.id,
-        model: modelFromEndpointOption,
-      });
-      primaryAgent.model = modelFromEndpointOption;
-    } else {
-      logger.warn('[initializeClient] No model found in endpointOption or request body', {
-        agentId: primaryAgent.id,
-        endpointOptionKeys: Object.keys(endpointOption),
-        reqBodyKeys: Object.keys(req.body || {}),
-      });
-    }
-  }
-
   const modelsConfig = await getModelsConfig(req);
   const validationResult = await validateAgentModel({
     req,
