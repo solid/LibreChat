@@ -1,5 +1,6 @@
 const { logger } = require('@librechat/data-schemas');
 const { DataFactory, Writer, Parser } = require('n3');
+const LinkHeader = require('http-link-header');
 
 // LDP (Linked Data Platform) namespace for parsing container Turtle responses
 const LDP_NS = 'http://www.w3.org/ns/ldp#';
@@ -27,12 +28,23 @@ const {
   deleteFile,
   getPodUrlAll,
   createContainerAt,
+  getSolidDataset,
+  getThing,
+  getUrl,
 } = require('@inrupt/solid-client');
 
 // ACL/ACP namespaces
 const ACL_NS = 'http://www.w3.org/ns/auth/acl#';
 const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
+/** PIM Space vocabulary: Storage type (Link header) and storage predicate (profile data) */
+const PIM_SPACE_STORAGE_TYPE = 'http://www.w3.org/ns/pim/space#Storage';
+const PIM_SPACE_STORAGE_PREDICATE = 'http://www.w3.org/ns/pim/space#storage';
+
+/** @param {string} url - @returns {string} URL with trailing slash */
+function ensureTrailingSlash(url) {
+  return url.endsWith('/') ? url : `${url}/`;
+}
 
 /**
  * Solid Storage Utility Module
@@ -207,6 +219,67 @@ async function getSolidFetch(req) {
 }
 
 /**
+ * Discover Pod root from a resource URL using Solid conventions (Link header, profile storage, path walk).
+ * Based on https://github.com/SolidLabResearch/Bashlib/blob/80de25cbb4b3ed057f95e25bc057f1be9b00cef3/src/utils/util.ts getPodRoot.
+ * Uses http-link-header (same as Bashlib) for Link header parsing.
+ *
+ * Real servers (e.g. solidcommunity.net): profile document has Link headers but no Storage type;
+ * the Pod root (e.g. https://user.solidcommunity.net/) returns Link: <http://www.w3.org/ns/pim/space#Storage>; rel="type".
+ * The profile Turtle has space:storage on the #me subject (WebID), not on the document URL.
+ *
+ * @param {string} url - Resource URL (e.g. WebID document URL without fragment) for HEAD/path walk
+ * @param {Function} fetch - Authenticated fetch function
+ * @param {string} [webId] - Full WebID (with #me) so we can read space:storage from the profile subject
+ * @returns {Promise<string|null>} Pod root URL with trailing slash, or null if not found
+ */
+async function getPodRoot(url, fetch, webId) {
+  if (!url || !fetch) return null;
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    if (!res.ok) return null;
+
+    const linkHeaders = res.headers.get('Link');
+    if (linkHeaders) {
+      const parsed = LinkHeader.parse(linkHeaders);
+      for (const ref of parsed.refs) {
+        const isStorageType =
+          ref.rel === 'type' &&
+          (ref.uri === PIM_SPACE_STORAGE_TYPE || ref.type === PIM_SPACE_STORAGE_TYPE);
+        if (isStorageType) {
+          const podUrl = ensureTrailingSlash(url);
+          logger.debug('[SolidStorage] Pod root from Link header', { url, podUrl });
+          return podUrl;
+        }
+      }
+    }
+
+    try {
+      const ds = await getSolidDataset(url, { fetch });
+      // space:storage is on the WebID subject (#me), not the document URL (see solidcommunity.net profile/card)
+      const thing = webId ? getThing(ds, webId) : getThing(ds, url);
+      const storageUrl = thing ? getUrl(thing, PIM_SPACE_STORAGE_PREDICATE) : null;
+      if (storageUrl) {
+        const podUrl = ensureTrailingSlash(storageUrl);
+        logger.debug('[SolidStorage] Pod root from profile storage predicate', { url, podUrl });
+        return podUrl;
+      }
+    } catch (_ignored) {
+      // Not a Solid dataset or no storage pointer
+    }
+
+    const splitUrl = url.split('/');
+    const index = url.endsWith('/') ? splitUrl.length - 2 : splitUrl.length - 1;
+    if (index < 0) return null;
+    const nextUrl = splitUrl.slice(0, index).join('/') + '/';
+    if (nextUrl === url) return null; // avoid infinite loop when at server root
+    return getPodRoot(nextUrl, fetch, webId);
+  } catch (err) {
+    logger.debug('[SolidStorage] getPodRoot failed for url', { url, error: err?.message });
+    return null;
+  }
+}
+
+/**
  * Get user's Pod URL from their WebID
  *
  * @param {string} webId - User's WebID
@@ -243,50 +316,48 @@ async function getPodUrl(webId, fetch) {
       });
     }
 
-    // If no Pod URLs found, derive from WebID as fallback
+    // If no Pod URLs found, use Solid discovery (Link header + profile storage + path walk), then path heuristic
     if (!podUrls || podUrls.length === 0) {
       logger.info('[SolidStorage] No Pod URLs found in profile, deriving from WebID', { webId });
 
-      // Extract base URL from WebID
-      // WebID format: http://localhost:3000/bisi/profile/card#me
-      // Pod URL format: http://localhost:3000/bisi/
       try {
         const webIdUrl = new URL(webId);
-        // Remove the fragment (#me) and path segments after the pod identifier
-        // For most Solid servers, the Pod is at the root or one level deep
-        // Pattern: http://host:port/podId/ -> Pod URL
-        const pathParts = webIdUrl.pathname.split('/').filter((p) => p);
+        // Resource URL = WebID without fragment (e.g. http://localhost:3000/bisi/profile/card)
+        const resourceUrl = webIdUrl.hash
+          ? webIdUrl.href.replace(webIdUrl.hash, '')
+          : webIdUrl.href;
 
-        // If path contains 'profile', 'card', or similar, remove them
-        // The Pod is usually at the base or one level up
+        // 1) Solid discovery: Link header, then profile storage predicate, then path walk (Bashlib getPodRoot)
+        // Pass webId so we can read space:storage from the #me subject in the profile document
+        let derivedPodUrl = await getPodRoot(resourceUrl, fetch, webId);
+        if (derivedPodUrl) {
+          logger.info('[SolidStorage] Derived Pod URL via Solid discovery', {
+            webId,
+            derivedPodUrl,
+          });
+          return derivedPodUrl;
+        }
+
+        // 2) Fallback: path-based heuristic (WebID format: .../podId/profile/card#me -> Pod at .../podId/)
+        const pathParts = webIdUrl.pathname.split('/').filter((p) => p);
         let podPath = '/';
         if (pathParts.length > 0) {
-          // For pattern like /bisi/profile/card, Pod is at /bisi/
-          // For pattern like /profile/card, Pod is at /
           const podIdentifier = pathParts[0];
           if (podIdentifier && podIdentifier !== 'profile' && podIdentifier !== 'card') {
             podPath = `/${podIdentifier}/`;
           }
         }
-
-        const derivedPodUrl = `${webIdUrl.protocol}//${webIdUrl.host}${podPath}`;
-        logger.info('[SolidStorage] Derived Pod URL from WebID', {
+        derivedPodUrl = `${webIdUrl.protocol}//${webIdUrl.host}${podPath}`;
+        logger.info('[SolidStorage] Derived Pod URL from path heuristic', {
           webId,
           derivedPodUrl,
           pathParts,
         });
 
-        // Verify the Pod URL is accessible by trying to fetch the root
+        // Verify the derived Pod URL is accessible
         try {
-          const response = await fetch(derivedPodUrl, {
-            method: 'HEAD',
-          });
+          const response = await fetch(derivedPodUrl, { method: 'HEAD' });
           if (response.ok || response.status === 401 || response.status === 403) {
-            // 401/403 means the Pod exists but we need auth (which is expected)
-            logger.info('[SolidStorage] Derived Pod URL is accessible', {
-              derivedPodUrl,
-              status: response.status,
-            });
             return derivedPodUrl;
           }
         } catch (verifyError) {
@@ -295,7 +366,6 @@ async function getPodUrl(webId, fetch) {
             error: verifyError.message,
           });
         }
-
         return derivedPodUrl;
       } catch (urlError) {
         logger.error('[SolidStorage] Failed to derive Pod URL from WebID', {
