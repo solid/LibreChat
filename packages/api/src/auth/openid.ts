@@ -42,7 +42,7 @@ export async function findOpenIDUser({
     // If user found by email, check if they're allowed to use this provider (OpenID or Solid)
     const allowedProviders =
       strategyName === 'SolidOpenidStrategy' ? ['openid', 'solid'] : ['openid'];
-    if (user && user.provider && !allowedProviders.includes(user.provider)) {
+    if (user?.provider && !allowedProviders.includes(user.provider)) {
       logger.warn(
         `[${strategyName}] Attempted OpenID login by user ${user.email}, was registered with "${user.provider}" provider`,
       );
