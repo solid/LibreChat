@@ -671,7 +671,7 @@ async function getMessagesFromSolid(req, conversationId) {
         files: messageFiles.map((f) => f.url),
       });
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error.status === 404) {
         // Container doesn't exist, return empty array
         logger.info('[SolidStorage] Messages container does not exist, returning empty array', {
           messagesContainerPath,
