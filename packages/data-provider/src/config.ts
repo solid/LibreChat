@@ -768,7 +768,7 @@ export type TStartupConfig = {
   openidAutoRedirect: boolean;
   solidLoginEnabled: boolean;
   solidLabel: string;
-  solidImageUrl?: string;
+  solidImageUrl: string;
   solidAutoRedirect: boolean;
   samlLabel: string;
   samlImageUrl: string;
