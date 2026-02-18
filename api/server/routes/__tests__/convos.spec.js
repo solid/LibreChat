@@ -327,13 +327,13 @@ describe('Convos Routes', () => {
       /** Verify deleteConvos was called with correct parameters */
       expect(deleteConvos).toHaveBeenCalledWith('test-user-123', {
         conversationId: mockConversationId,
-      });
+      }, expect.anything());
 
       /** Verify deleteToolCalls was called */
       expect(deleteToolCalls).toHaveBeenCalledWith('test-user-123', mockConversationId);
 
       /** Verify deleteConvoSharedLink was called */
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId);
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
     });
 
     it('should not call deleteConvoSharedLink when no conversationId provided', async () => {
