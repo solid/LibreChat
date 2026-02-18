@@ -371,7 +371,7 @@ describe('Convos Routes', () => {
         });
 
       expect(response.status).toBe(201);
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId);
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
     });
 
     it('should return 400 when no parameters provided', async () => {
@@ -489,7 +489,7 @@ describe('Convos Routes', () => {
       expect(response.status).toBe(201);
 
       /** Verify shared links were deleted for the specific conversation */
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId);
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
 
       /** Verify it was called after the conversation was deleted */
       expect(deleteConvoSharedLink).toHaveBeenCalledAfter(deleteConvos);
