@@ -151,7 +151,7 @@ describe('Convos Routes', () => {
       expect(response.body).toEqual(mockDbResponse);
 
       /** Verify deleteConvos was called with correct userId */
-      expect(deleteConvos).toHaveBeenCalledWith('test-user-123', {});
+      expect(deleteConvos).toHaveBeenCalledWith('test-user-123', {}, expect.anything());
       expect(deleteConvos).toHaveBeenCalledTimes(1);
 
       /** Verify deleteToolCalls was called with correct userId */
