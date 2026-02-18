@@ -1,5 +1,4 @@
 const { logger } = require('@librechat/data-schemas');
-const fetch = require('node-fetch');
 const { DataFactory, Writer, Parser } = require('n3');
 
 // LDP (Linked Data Platform) namespace for parsing container Turtle responses
