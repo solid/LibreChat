@@ -32,7 +32,6 @@ const jwtExtractor = (req) => {
 const jwtLogin = () =>
   new JwtStrategy(
     {
-      // jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       jwtFromRequest: jwtExtractor,
       secretOrKey: process.env.JWT_SECRET,
     },
