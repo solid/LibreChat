@@ -325,15 +325,23 @@ describe('Convos Routes', () => {
       expect(response.body).toEqual(mockDbResponse);
 
       /** Verify deleteConvos was called with correct parameters */
-      expect(deleteConvos).toHaveBeenCalledWith('test-user-123', {
-        conversationId: mockConversationId,
-      }, expect.anything());
+      expect(deleteConvos).toHaveBeenCalledWith(
+        'test-user-123',
+        {
+          conversationId: mockConversationId,
+        },
+        expect.anything(),
+      );
 
       /** Verify deleteToolCalls was called */
       expect(deleteToolCalls).toHaveBeenCalledWith('test-user-123', mockConversationId);
 
       /** Verify deleteConvoSharedLink was called */
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith(
+        'test-user-123',
+        mockConversationId,
+        expect.anything(),
+      );
     });
 
     it('should not call deleteConvoSharedLink when no conversationId provided', async () => {
@@ -371,7 +379,11 @@ describe('Convos Routes', () => {
         });
 
       expect(response.status).toBe(201);
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith(
+        'test-user-123',
+        mockConversationId,
+        expect.anything(),
+      );
     });
 
     it('should return 400 when no parameters provided', async () => {
@@ -489,7 +501,11 @@ describe('Convos Routes', () => {
       expect(response.status).toBe(201);
 
       /** Verify shared links were deleted for the specific conversation */
-      expect(deleteConvoSharedLink).toHaveBeenCalledWith('test-user-123', mockConversationId, expect.anything());
+      expect(deleteConvoSharedLink).toHaveBeenCalledWith(
+        'test-user-123',
+        mockConversationId,
+        expect.anything(),
+      );
 
       /** Verify it was called after the conversation was deleted */
       expect(deleteConvoSharedLink).toHaveBeenCalledAfter(deleteConvos);
