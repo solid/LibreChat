@@ -562,6 +562,67 @@ async function ensureBaseStructure(podUrl, fetch) {
   }
 }
 
+/** Per-user baton: openidId -> Promise that resolves when ensureBaseStructure has completed for that Pod */
+const baseStructureBatonMap = new Map();
+
+/**
+ * Waits for the Pod base structure to be ready for this user (baton).
+ * If login already started ensureBaseStructure in the background, we wait for it.
+ * Otherwise we run it once (lazy) and cache the promise so other writes wait too.
+ *
+ * @param {Object} req - Express request (must have req.user.openidId)
+ * @returns {Promise<void>}
+ */
+async function ensureBaseStructureReady(req) {
+  const openidId = req?.user?.openidId;
+  if (!openidId) {
+    throw new Error('User not authenticated with Solid/OpenID');
+  }
+  let promise = baseStructureBatonMap.get(openidId);
+  if (!promise) {
+    const authenticatedFetch = await getSolidFetch(req);
+    const podUrl = await getPodUrl(openidId, authenticatedFetch);
+    promise = ensureBaseStructure(podUrl, authenticatedFetch).catch((err) => {
+      baseStructureBatonMap.delete(openidId);
+      throw err;
+    });
+    baseStructureBatonMap.set(openidId, promise);
+  }
+  await promise;
+}
+
+/**
+ * Starts ensureBaseStructure in the background for this user (call after Solid/OpenID login).
+ * Writes will wait for this to complete via ensureBaseStructureReady (baton).
+ * Safe to call multiple times per user; only the first run is used.
+ *
+ * @param {Object} req - Express request (must have req.user with openidId and session for fetch)
+ */
+function startBaseStructureAfterLogin(req) {
+  const openidId = req?.user?.openidId;
+  if (!openidId) return Promise.resolve();
+  const existing = baseStructureBatonMap.get(openidId);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    try {
+      const authenticatedFetch = await getSolidFetch(req);
+      const podUrl = await getPodUrl(openidId, authenticatedFetch);
+      await ensureBaseStructure(podUrl, authenticatedFetch);
+      logger.debug('[SolidStorage] Base structure ready after login', { openidId });
+    } catch (err) {
+      baseStructureBatonMap.delete(openidId);
+      logger.warn('[SolidStorage] Base structure init after login failed', {
+        openidId,
+        error: err?.message,
+      });
+      throw err;
+    }
+  })();
+  baseStructureBatonMap.set(openidId, promise);
+  return promise;
+}
+
 /**
  * Save a message to Solid Pod.
  * Document content is built in the model layer (schema-aligned); this only persists it.
@@ -589,9 +650,9 @@ async function saveMessageToSolid(req, messageDocument, metadata) {
       throw new Error('conversationId is required');
     }
 
+    await ensureBaseStructureReady(req);
     const authenticatedFetch = await getSolidFetch(req);
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
-    await ensureBaseStructure(podUrl, authenticatedFetch);
 
     const messagesContainerPath = getMessagesContainerPath(podUrl, messageDocument.conversationId);
     await ensureContainerExists(messagesContainerPath, authenticatedFetch);
@@ -1209,9 +1270,9 @@ async function saveConvoToSolid(req, convoDocument, metadata) {
       throw new Error('conversationId is required');
     }
 
+    await ensureBaseStructureReady(req);
     const authenticatedFetch = await getSolidFetch(req);
     const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
-    await ensureBaseStructure(podUrl, authenticatedFetch);
 
     const conversationPath = getConversationPath(podUrl, finalConversationId);
 
@@ -2948,6 +3009,7 @@ module.exports = {
   getMessagePath,
   ensureContainerExists,
   ensureBaseStructure,
+  startBaseStructureAfterLogin,
   saveMessageToSolid,
   getMessagesFromSolid,
   updateMessageInSolid,

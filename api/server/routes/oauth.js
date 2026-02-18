@@ -9,6 +9,7 @@ const { checkDomainAllowed, loginLimiter, logHeaders, checkBan } = require('~/se
 const { createOAuthHandler: _createOAuthHandler } = require('~/server/controllers/auth/oauth');
 const { setAuthTokens, setOpenIDAuthTokens } = require('~/server/services/AuthService');
 const { syncUserEntraGroupMemberships } = require('~/server/services/PermissionService');
+const { startBaseStructureAfterLogin } = require('~/server/services/SolidStorage');
 const { getAppConfig } = require('~/server/services/Config');
 const { Balance } = require('~/db/models');
 
@@ -61,6 +62,15 @@ const oauthHandler = async (req, res, next) => {
       } else {
         // When OPENID_REUSE_TOKENS is disabled, create standard JWT tokens
         await setAuthTokens(req.user._id, res);
+      }
+      // Ensure Solid Pod base structure in background so writes don't call it every time (baton)
+      if (req.user.openidId) {
+        startBaseStructureAfterLogin(req).catch((err) =>
+          logger.warn('[oauthHandler] Solid base structure init after login failed', {
+            openidId: req.user.openidId,
+            error: err?.message,
+          }),
+        );
       }
     } else {
       await setAuthTokens(req.user._id, res);
