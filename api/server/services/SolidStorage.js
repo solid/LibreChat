@@ -811,49 +811,55 @@ async function getMessagesFromSolid(req, conversationId) {
       fileCount: messageFiles.length,
     });
 
-    // Read all message files
-    const messages = [];
-    for (const fileInfo of messageFiles) {
-      try {
+    // Read all message files in parallel
+    const messageDataResults = await Promise.all(
+      messageFiles.map(async (fileInfo) => {
         const fileUrl = fileInfo.url;
-        logger.debug('[SolidStorage] Reading message file', {
-          fileUrl,
-          conversationId,
-        });
-
-        const file = await getFile(fileUrl, { fetch: authenticatedFetch });
-        const fileText = await file.text();
-        const messageData = JSON.parse(fileText);
-
-        // Validate that this message belongs to the current user
-        if (messageData.user !== req.user.id) {
-          logger.warn('[SolidStorage] Message belongs to different user, skipping', {
-            messageId: messageData.messageId,
-            messageUserId: messageData.user,
-            currentUserId: req.user.id,
+        try {
+          logger.debug('[SolidStorage] Reading message file', {
+            fileUrl,
+            conversationId,
           });
-          continue;
-        }
-
-        // Validate that this message belongs to the requested conversation
-        if (messageData.conversationId !== conversationId) {
-          logger.warn('[SolidStorage] Message belongs to different conversation, skipping', {
-            messageId: messageData.messageId,
-            messageConversationId: messageData.conversationId,
-            requestedConversationId: conversationId,
+          const file = await getFile(fileUrl, { fetch: authenticatedFetch });
+          const fileText = await file.text();
+          const messageData = JSON.parse(fileText);
+          return messageData;
+        } catch (error) {
+          logger.error('[SolidStorage] Error reading message file', {
+            fileUrl,
+            conversationId,
+            error: error.message,
           });
-          continue;
+          return null;
         }
+      }),
+    );
 
-        messages.push(messageData);
-      } catch (error) {
-        logger.error('[SolidStorage] Error reading message file', {
-          fileUrl: fileInfo.url,
-          conversationId,
-          error: error.message,
+    const messages = [];
+    for (const messageData of messageDataResults) {
+      if (!messageData) continue;
+
+      // Validate that this message belongs to the current user
+      if (messageData.user !== req.user.id) {
+        logger.warn('[SolidStorage] Message belongs to different user, skipping', {
+          messageId: messageData.messageId,
+          messageUserId: messageData.user,
+          currentUserId: req.user.id,
         });
-        // Continue with other files even if one fails
+        continue;
       }
+
+      // Validate that this message belongs to the requested conversation
+      if (messageData.conversationId !== conversationId) {
+        logger.warn('[SolidStorage] Message belongs to different conversation, skipping', {
+          messageId: messageData.messageId,
+          messageConversationId: messageData.conversationId,
+          requestedConversationId: conversationId,
+        });
+        continue;
+      }
+
+      messages.push(messageData);
     }
 
     // Sort messages by createdAt (ascending)
