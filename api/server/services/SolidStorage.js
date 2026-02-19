@@ -1731,7 +1731,8 @@ async function getConvosByCursorFromSolid(req, options = {}) {
       });
 
       // Check if error is a 404 (container doesn't exist) - use status only
-      const isNotFound = errorStatus === 404 || errorStatus === '404' || error?.response?.status === 404;
+      const isNotFound =
+        errorStatus === 404 || errorStatus === '404' || error?.response?.status === 404;
 
       if (isNotFound) {
         // Container doesn't exist, return empty result (this is expected for new users)
