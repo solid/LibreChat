@@ -474,27 +474,21 @@ async function ensureContainerExists(containerUrl, fetch) {
 
       // If we get here, container might not exist
       if (response.status === 404) {
-        throw new Error('Container not found');
+        const err = new Error('Container not found');
+        err.status = 404;
+        err.response = { status: 404 };
+        throw err;
       }
     } catch (error) {
-      // Container doesn't exist, create it
-      if (
-        error.status === 404 ||
-        error.message?.includes('404') ||
-        error.message?.includes('not found') ||
-        error.message?.includes('Container not found')
-      ) {
+      // Container doesn't exist, create it (use status only)
+      if (error?.status === 404 || error?.response?.status === 404) {
         logger.info('[SolidStorage] Container does not exist, creating', { containerUrl });
         try {
           await createContainerAt(containerUrl, { fetch });
           logger.info('[SolidStorage] Container created successfully', { containerUrl });
         } catch (createError) {
           // If creation fails with 409, container already exists (race condition)
-          if (
-            createError.status === 409 ||
-            createError.message?.includes('409') ||
-            createError.message?.includes('already exists')
-          ) {
+          if (createError?.status === 409 || createError?.response?.status === 409) {
             logger.debug('[SolidStorage] Container already exists (race condition)', {
               containerUrl,
             });
@@ -678,7 +672,7 @@ async function saveMessageToSolid(req, messageDocument, metadata) {
       await getFile(messagePath, { fetch: authenticatedFetch });
       messageExists = true;
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         messageExists = false;
       } else {
         logger.warn('[SolidStorage] Error checking if message exists, will try to save anyway', {
@@ -1037,7 +1031,7 @@ async function updateMessageInSolid(req, messageData, metadata) {
         conversationId,
       });
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         throw new Error(`Message with ID ${messageData.messageId} not found`);
       }
       throw error;
@@ -1211,7 +1205,7 @@ async function deleteMessagesFromSolid(req, params) {
           messageId: message.messageId,
         });
       } catch (error) {
-        if (error.status === 404 || error.message?.includes('404')) {
+        if (error?.status === 404 || error?.response?.status === 404) {
           // File already doesn't exist, count it as deleted
           logger.debug('[SolidStorage] Message file already deleted', {
             messageId: message.messageId,
@@ -1286,7 +1280,7 @@ async function saveConvoToSolid(req, convoDocument, metadata) {
         hasTitle: !!existingConversation.title,
       });
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         logger.debug('[SolidStorage] Conversation does not exist yet, will create new', {
           conversationId: finalConversationId,
         });
@@ -1569,7 +1563,7 @@ async function getConvoFromSolid(req, conversationId) {
 
       return conversationData;
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         logger.info('[SolidStorage] Conversation not found', {
           conversationId,
         });
@@ -1710,14 +1704,11 @@ async function getConvosByCursorFromSolid(req, options = {}) {
         responseStatusText: error?.response?.statusText,
       });
 
-      // Check if error is a 404 (container doesn't exist)
+      // Check if error is a 404 (container doesn't exist) - use status only
       const isNotFound =
         errorStatus === 404 ||
         errorStatus === '404' ||
-        errorMessage?.includes('404') ||
-        errorMessage?.includes('Not Found') ||
-        errorMessage?.toLowerCase().includes('not found') ||
-        errorMessage?.toLowerCase().includes('404');
+        error?.response?.status === 404;
 
       if (isNotFound) {
         // Container doesn't exist, return empty result (this is expected for new users)
@@ -2066,7 +2057,7 @@ async function deleteConvosFromSolid(req, conversationIds) {
             conversationPath,
           });
         } catch (error) {
-          if (error.status === 404 || error.message?.includes('404')) {
+          if (error?.status === 404 || error?.response?.status === 404) {
             // File already doesn't exist, count it as deleted
             deletedCount++;
             logger.debug('[SolidStorage] Conversation file already deleted', {
@@ -2166,12 +2157,12 @@ async function fetchAcl(aclUrl, fetchFn) {
     }
     return await response.text();
   } catch (error) {
-    // Treat 404 and 403 as "no ACL exists"
+    // Treat 404 and 403 as "no ACL exists" (use status only)
     if (
-      error.status === 404 ||
-      error.status === 403 ||
-      error.message?.includes('404') ||
-      error.message?.includes('403')
+      error?.status === 404 ||
+      error?.status === 403 ||
+      error?.response?.status === 404 ||
+      error?.response?.status === 403
     ) {
       return null;
     }
@@ -2738,7 +2729,7 @@ async function removePublicAccessForShare(req, conversationId) {
         conversationId,
       });
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         logger.debug('[SolidStorage] Conversation file not found when removing public access', {
           conversationPath,
           conversationId,
@@ -2767,7 +2758,7 @@ async function removePublicAccessForShare(req, conversationId) {
         conversationId,
       });
     } catch (error) {
-      if (error.status === 404 || error.message?.includes('404')) {
+      if (error?.status === 404 || error?.response?.status === 404) {
         logger.debug('[SolidStorage] Messages container not found when removing public access', {
           messagesContainerPath,
           conversationId,
@@ -2808,7 +2799,7 @@ async function removePublicAccessForShare(req, conversationId) {
         await removePublicReadAccess(messagePath, authenticatedFetch);
         messagesUnshared++;
       } catch (error) {
-        if (error.status === 404 || error.message?.includes('404')) {
+        if (error?.status === 404 || error?.response?.status === 404) {
           logger.debug('[SolidStorage] Message file not found when removing public access', {
             messageId: message.messageId,
             conversationId,
