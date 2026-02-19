@@ -395,6 +395,36 @@ async function getPodUrl(webId, fetch) {
 }
 
 /**
+ * Get authenticated fetch and Pod URL for the current Solid user, with session cache.
+ * Pod URL is fetched once per session (e.g. at first use after login) to avoid repeated profile requests.
+ *
+ * @param {Object} req - Express request (must have req.user.openidId and session)
+ * @returns {Promise<{ authenticatedFetch: Function, podUrl: string }>}
+ */
+async function getSolidFetchAndPodUrl(req) {
+  const openidId = req?.user?.openidId;
+  if (!openidId) {
+    throw new Error('User not authenticated with Solid/OpenID');
+  }
+
+  const cached =
+    req.session?.solidCachedPodUrlWebId === openidId && req.session?.solidCachedPodUrl;
+  if (cached) {
+    const authenticatedFetch = await getSolidFetch(req);
+    logger.debug('[SolidStorage] Using cached Pod URL from session', { openidId });
+    return { authenticatedFetch, podUrl: req.session.solidCachedPodUrl };
+  }
+
+  const authenticatedFetch = await getSolidFetch(req);
+  const podUrl = await getPodUrl(openidId, authenticatedFetch);
+  if (req.session) {
+    req.session.solidCachedPodUrl = podUrl;
+    req.session.solidCachedPodUrlWebId = openidId;
+  }
+  return { authenticatedFetch, podUrl };
+}
+
+/**
  * Get base storage path for LibreChat data in Pod
  *
  * @param {string} podUrl - Pod URL
@@ -574,8 +604,7 @@ async function ensureBaseStructureReady(req) {
   }
   let promise = baseStructureBatonMap.get(openidId);
   if (!promise) {
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
     promise = ensureBaseStructure(podUrl, authenticatedFetch).catch((err) => {
       baseStructureBatonMap.delete(openidId);
       throw err;
@@ -600,8 +629,7 @@ function startBaseStructureAfterLogin(req) {
 
   const promise = (async () => {
     try {
-      const authenticatedFetch = await getSolidFetch(req);
-      const podUrl = await getPodUrl(openidId, authenticatedFetch);
+      const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
       await ensureBaseStructure(podUrl, authenticatedFetch);
       logger.debug('[SolidStorage] Base structure ready after login', { openidId });
     } catch (err) {
@@ -645,8 +673,7 @@ async function saveMessageToSolid(req, messageDocument, metadata) {
     }
 
     await ensureBaseStructureReady(req);
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     const messagesContainerPath = getMessagesContainerPath(podUrl, messageDocument.conversationId);
     await ensureContainerExists(messagesContainerPath, authenticatedFetch);
@@ -743,8 +770,7 @@ async function getMessagesFromSolid(req, conversationId) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // Get messages container path
     const messagesContainerPath = getMessagesContainerPath(podUrl, conversationId);
@@ -919,8 +945,7 @@ async function updateMessageInSolid(req, messageData, metadata) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // First, try to get the existing message to merge updates
     let existingMessage = null;
@@ -1124,8 +1149,7 @@ async function deleteMessagesFromSolid(req, params) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // Get messages container path
     const _messagesContainerPath = getMessagesContainerPath(podUrl, params.conversationId);
@@ -1271,8 +1295,7 @@ async function saveConvoToSolid(req, convoDocument, metadata) {
     }
 
     await ensureBaseStructureReady(req);
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     const conversationPath = getConversationPath(podUrl, finalConversationId);
 
@@ -1421,8 +1444,7 @@ async function getConvoFromSolid(req, conversationId) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // Get conversation file path
     const conversationPath = getConversationPath(podUrl, conversationId);
@@ -1640,9 +1662,8 @@ async function getConvosByCursorFromSolid(req, options = {}) {
     const finalSortDirection = sortDirection === 'asc' ? 'asc' : 'desc';
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
     // TODO: Allow user to select their storage (can happen after the initial PR).
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
 
     // Get conversations container path
     const conversationsContainerPath = `${getBaseStoragePath(podUrl)}conversations/`;
@@ -1967,8 +1988,7 @@ async function deleteConvosFromSolid(req, conversationIds) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     let deletedCount = 0;
 
@@ -2548,8 +2568,7 @@ async function setPublicAccessForShare(req, conversationId) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // Get conversation file path
     const conversationPath = getConversationPath(podUrl, conversationId);
@@ -2717,8 +2736,7 @@ async function removePublicAccessForShare(req, conversationId) {
     }
 
     // Get authenticated fetch and Pod URL
-    const authenticatedFetch = await getSolidFetch(req);
-    const podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+    const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
 
     // Get conversation file path
     const conversationPath = getConversationPath(podUrl, conversationId);
