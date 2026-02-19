@@ -171,7 +171,7 @@ module.exports = {
       if (metadata && metadata.unsetFields && Object.keys(metadata.unsetFields).length > 0) {
         updateOperation.$unset = metadata.unsetFields;
       }
-      
+
       /** Note: the resulting Model object is necessary for Meilisearch operations */
       const conversation = await Conversation.findOneAndUpdate(
         { conversationId, user: req.user.id },
