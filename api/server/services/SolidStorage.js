@@ -616,25 +616,7 @@ async function ensureBaseStructureReady(req) {
 function startBaseStructureAfterLogin(req) {
   const openidId = req?.user?.openidId;
   if (!openidId) return Promise.resolve();
-  const existing = baseStructureBatonMap.get(openidId);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    try {
-      const { authenticatedFetch, podUrl } = await getSolidFetchAndPodUrl(req);
-      await ensureBaseStructure(podUrl, authenticatedFetch);
-      logger.debug('[SolidStorage] Base structure ready after login', { openidId });
-    } catch (err) {
-      baseStructureBatonMap.delete(openidId);
-      logger.warn('[SolidStorage] Base structure init after login failed', {
-        openidId,
-        error: err?.message,
-      });
-      throw err;
-    }
-  })();
-  baseStructureBatonMap.set(openidId, promise);
-  return promise;
+  return ensureBaseStructureReady(req);
 }
 
 /**
