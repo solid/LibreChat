@@ -408,7 +408,7 @@ async function getSolidFetchAndPodUrl(req) {
   }
 
   const authenticatedFetch = await getSolidFetch(req);
-  const podUrl = req.session?.solidCachedPodUrl ?? await getPodUrl(openidId, authenticatedFetch);
+  const podUrl = req.session?.solidCachedPodUrl ?? (await getPodUrl(openidId, authenticatedFetch));
   if (req.session) {
     req.session.solidCachedPodUrl = podUrl;
     req.session.solidCachedPodUrlWebId = openidId;
