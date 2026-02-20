@@ -407,15 +407,8 @@ async function getSolidFetchAndPodUrl(req) {
     throw new Error('User not authenticated with Solid/OpenID');
   }
 
-  const cached = req.session?.solidCachedPodUrlWebId === openidId && req.session?.solidCachedPodUrl;
-  if (cached) {
-    const authenticatedFetch = await getSolidFetch(req);
-    logger.debug('[SolidStorage] Using cached Pod URL from session', { openidId });
-    return { authenticatedFetch, podUrl: req.session.solidCachedPodUrl };
-  }
-
   const authenticatedFetch = await getSolidFetch(req);
-  const podUrl = await getPodUrl(openidId, authenticatedFetch);
+  const podUrl = req.session?.solidCachedPodUrl ?? await getPodUrl(openidId, authenticatedFetch);
   if (req.session) {
     req.session.solidCachedPodUrl = podUrl;
     req.session.solidCachedPodUrlWebId = openidId;
