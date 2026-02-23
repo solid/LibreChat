@@ -78,17 +78,13 @@ const refreshController = async (req, res) => {
       logger.warn(
         '[refreshController] No OpenID refresh token available, falling back to standard refresh',
       );
-      // Fall through to standard refresh logic below
-    } else {
-      // We have a refresh token, use OpenID refresh flow
-      try {
+      return res.status(200).send('Refresh token not provided');
+    }
+
+    // We have a refresh token, use OpenID refresh flow
+    try {
         const openIdConfig = getOpenIdConfig();
-        const refreshParams = process.env.OPENID_SCOPE ? { scope: process.env.OPENID_SCOPE } : {};
-      const tokenset = await openIdClient.refreshTokenGrant(
-        openIdConfig,
-        refreshToken,
-        refreshParams,
-      );
+        const tokenset = await openIdClient.refreshTokenGrant(openIdConfig, refreshToken);
         const claims = tokenset.claims();
         const { user, error, migration } = await findOpenIDUser({
           findUser,
@@ -132,10 +128,8 @@ const refreshController = async (req, res) => {
         };
 
         return res.status(200).send({ token, user });
-      } catch (error) {
-        logger.error('[refreshController] OpenID token refresh error', error);
-        // Fall through to standard refresh logic as fallback
-      }
+    } catch (error) {
+      logger.error('[refreshController] OpenID token refresh error', error);
     }
   }
 

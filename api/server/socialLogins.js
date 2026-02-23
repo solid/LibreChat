@@ -16,36 +16,6 @@ const {
 } = require('~/strategies');
 const { getLogStores } = require('~/cache');
 
-
-/**
- * Configures Solid OpenID Connect for the application.
- * @param {Express.Application} app - The Express application instance.
- * @returns {Promise<void>}
- */
-async function configureSolidOpenId(app) {
-  logger.info('Configuring Solid OpenID Connect...');
-  const sessionOptions = {
-    secret: process.env.SOLID_OPENID_SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    store: getLogStores(CacheKeys.OPENID_SESSION),
-  };
-  app.use(session(sessionOptions));
-  app.use(passport.session());
-
-  const config = await setupSolidOpenId();
-  if (!config) {
-    logger.error('Solid OpenID Connect configuration failed - strategy not registered.');
-    return;
-  }
-
-  if (isEnabled(process.env.OPENID_REUSE_TOKENS)) {
-    logger.info('Solid OpenID token reuse is enabled.');
-    passport.use('solidJwt', openIdJwtLogin(config));
-  }
-  logger.info('Solid OpenID Connect configured successfully.');
-}
-
 /**
 * Configures Solid OpenID Connect for the application.
  * @param {Express.Application} app - The Express application instance.
