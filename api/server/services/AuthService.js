@@ -514,7 +514,7 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         res.cookie('refreshToken', refreshToken, {
           expires: expirationDate,
           httpOnly: true,
-          secure: isProduction,
+          secure: shouldUseSecureCookie(),
           sameSite: 'strict',
         });
       }
@@ -524,10 +524,7 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         secure: shouldUseSecureCookie(),
         sameSite: 'strict',
       });
-      logger.info('[setOpenIDAuthTokens] Tokens stored in cookies', {
-        hasAccessToken: !!tokenset.access_token,
-        hasRefreshToken: !!refreshToken,
-      });
+     
       if (tokenset.id_token) {
         res.cookie('openid_id_token', tokenset.id_token, {
           expires: expirationDate,
@@ -536,6 +533,10 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
           sameSite: 'strict',
         });
       }
+      logger.info('[setOpenIDAuthTokens] Tokens stored in cookies', {
+        hasAccessToken: !!tokenset.access_token,
+        hasRefreshToken: !!refreshToken,
+      });
     }
 
     /** Small cookie to indicate token provider (required for auth middleware) */
