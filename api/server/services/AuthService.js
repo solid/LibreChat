@@ -451,8 +451,10 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
     // Log warning if no refresh token, but continue with access token only
     // Some providers (like Solid) may not provide refresh tokens
     if (!refreshToken) {
-      logger.error('[setOpenIDAuthTokens] No refresh token available');
-      return;
+      logger.warn('[setOpenIDAuthTokens] No refresh token available - will use access token only', {
+        hasAccessToken: !!tokenset.access_token,
+        provider: req.user?.provider,
+      });
     }
 
     /**
@@ -465,20 +467,17 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
     const appAuthToken = tokenset.id_token || tokenset.access_token;
 
     /**
-     * Always set refresh token cookie so it survives express session expiry.
-     * The session cookie maxAge (SESSION_EXPIRY, default 15 min) is typically shorter
-     * than the OIDC token lifetime (~1 hour). Without this cookie fallback, the refresh
-     * token stored only in the session is lost when the session expires, causing the user
-     * to be signed out on the next token refresh attempt.
-     * The refresh token is small (opaque string) so it doesn't hit the HTTP/2 header
-     * size limits that motivated session storage for the larger access_token/id_token.
+     * Set refresh token cookie when available so it survives express session expiry.
+     * Some providers (e.g. Solid) may not issue refresh tokens; then we rely on session only.
      */
-    res.cookie('refreshToken', refreshToken, {
-      expires: expirationDate,
-      httpOnly: true,
-      secure: shouldUseSecureCookie(),
-      sameSite: 'strict',
-    });
+    if (refreshToken) {
+      res.cookie('refreshToken', refreshToken, {
+        expires: expirationDate,
+        httpOnly: true,
+        secure: shouldUseSecureCookie(),
+        sameSite: 'strict',
+      });
+    }
 
     /** Store tokens server-side in session to avoid large cookies */
     if (req.session) {
@@ -524,7 +523,7 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         secure: shouldUseSecureCookie(),
         sameSite: 'strict',
       });
-     
+
       if (tokenset.id_token) {
         res.cookie('openid_id_token', tokenset.id_token, {
           expires: expirationDate,
