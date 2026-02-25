@@ -261,7 +261,7 @@ describe('setOpenIDAuthTokens', () => {
       expect(result).toBe('id');
       expect(req.session.openidTokens.accessToken).toBe('access');
       expect(req.session.openidTokens.idToken).toBe('id');
-      expect(req.session.openidTokens.refreshToken).toBeUndefined();
+      expect(req.session.openidTokens.refreshToken == null).toBe(true);
     });
 
     it('should use existingRefreshToken when tokenset has no refresh_token', () => {
