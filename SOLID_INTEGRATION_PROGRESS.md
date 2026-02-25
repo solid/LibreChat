@@ -139,6 +139,19 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - **requireJwtAuth.js**: Removed non–Solid-specific debug logging added during auth flow debugging; reviewer suggested upstreaming useful logging in a separate PR if needed.
   - **convos.js**: No code change; reviewer concern addressed by clarification—`getConvo(req.user.id, conversationId, req)` in `Conversation.js` already branches on `isSolidUser(req)` and uses Solid when the user is a Solid user.
 
+### 16. Refresh Token Support & Post-Login Redirect
+- **Status**: Complete
+- **Details**:
+  - **Post-login redirect fix**: After Solid OAuth callback, the client calls `/api/auth/refresh`. When the IdP does not return a refresh token (e.g. local Community Solid Server with static client), we now return `{ token, user }` from the **session** (decode id_token for `sub`, find user by openidId, return session token). This prevents the client from redirecting to `/login` when no refresh token is available.
+  - **Refresh token flow**: When a refresh token *is* present (session or cookie), the refresh controller uses `performOpenIDRefresh` with Solid config and `SOLID_OPENID_SCOPE` to exchange it for new tokens and return `{ token, user }`. Code is ready for IdPs that issue refresh tokens (e.g. solidcommunity.net when properly registered).
+  - **prompt=consent**: Added `prompt=consent` to the Solid authorization request so that IdPs that support it (e.g. node-oidc-provider) will issue a refresh token when `offline_access` is in scope. Without it, many IdPs do not return a refresh token.
+  - **JWT strategy by provider**: Solid registers the strategy name `solidJwt`; generic OpenID registers `openidJwt`. Updated `requireJwtAuth.js` and `optionalJwtAuth.js` to use `solidJwt` when `token_provider === 'solid'` and `openidJwt` when `token_provider === 'openid'`, so API requests after Solid login authenticate correctly when only Solid is configured (generic OpenID may be unregistered e.g. due to HTTPS requirement).
+  - **Token storage**: `setOpenIDAuthTokens` in AuthService stores access, id, and refresh tokens in session; sets `token_provider` cookie from `req.user?.provider` (so Solid gets `token_provider=solid`); only sets the refresh-token cookie when a refresh token exists. No early return when refresh token is missing—access token is always stored so session fallback can work.
+- **Findings**:
+  - **Local CSS (Community Solid Server)** with static client registration (`SOLID_OPENID_CLIENT_ID` / secret from env) does **not** return a refresh token in the token response by default. The server response only includes `access_token`, `id_token`, `expires_in`, `scope`, `token_type`. Adding `prompt=consent` and `scope=openid webid offline_access` is correct and required for IdPs that do support refresh tokens; for local CSS the static client may need to be explicitly configured on the server to allow `refresh_token` grant and `offline_access` scope.
+  - **solidcommunity.net** (remote IdP): The IdP **dereferences the client_id URL** to fetch client metadata. If `SOLID_OPENID_CLIENT_ID` is a localhost URL (e.g. `http://localhost:3080/solid-client-id`), the remote server cannot reach it and returns 500 ("request to http://localhost:3080/solid-client-id failed, reason: connect ECONNREFUSED"). To use solidcommunity.net, the app must be hosted at a **public URL** and `SOLID_OPENID_CLIENT_ID` must be a publicly reachable URL (or a client id issued by their registration process). Redirect URI must also be public.
+  - **SOLID_OPENID_SCOPE**: Use `"openid webid offline_access"` for refresh token support when the IdP supports it.
+
 ## Current Status
 
 ### Working Features
@@ -189,6 +202,9 @@ None currently identified.
 - Generic "Login with OpenID" button using `OPENID_*` environment variables
 - Both buttons share the same authentication flow and `/oauth/openid` route
 - Custom SolidIcon component for Solid branding
+- **Refresh token**: When the IdP returns a refresh token, it is stored in session (and cookie when present) and used by `/api/auth/refresh` to obtain new tokens. When no refresh token is returned (e.g. local CSS with static client), a session fallback returns the current session token and user so the client does not redirect to `/login`.
+- **Authorization request**: Solid flow sends `prompt=consent` and `scope=openid webid offline_access` so IdPs that support it can issue a refresh token.
+- **JWT strategies**: Solid uses `solidJwt`, generic OpenID uses `openidJwt`; `requireJwtAuth` and `optionalJwtAuth` select the strategy based on `token_provider` cookie.
 
 ### Access Control (ACL)
 - Uses manual ACL Turtle format for permission management
@@ -218,11 +234,15 @@ None currently identified.
 - `api/server/routes/oauth.js` - Token logging and storage
 - `api/server/services/AuthService.js` - Token management
 - `api/server/index.js` - Session middleware ordering
-- `api/server/controllers/AuthController.js` - Refresh token handling
+- `api/server/controllers/AuthController.js` - Refresh token handling; session fallback when no refresh token (decode session token, find user by openidId, return { token, user }); `performOpenIDRefresh` shared helper; Solid vs openid branch by `token_provider`
+- `api/server/services/AuthService.js` - setOpenIDAuthTokens: store access/id/refresh in session; set `token_provider` cookie from req.user?.provider; refresh-token cookie only when refresh token present; no early return when refresh token missing
+- `api/server/middleware/requireJwtAuth.js` - Use `solidJwt` when token_provider is solid, `openidJwt` when openid (so Solid-only config works)
+- `api/server/middleware/optionalJwtAuth.js` - Use `solidJwt` when token_provider is solid, `openidJwt` when openid; support both for OPENID_REUSE_TOKENS
+- `api/strategies/SolidOpenidStrategy.js` - Added `prompt=consent` in authorizationRequestParams for refresh token support; removed temporary SOLID_DEBUG_TOKENS logging
 - `api/server/middleware/validate/convoAccess.js` - Added Solid storage support for conversation access validation
 - `api/server/middleware/buildEndpointOption.js` - Uses storage-agnostic `getConvo(req.user.id, conversationId, req)` to fill missing model (no Solid-specific logic)
 - `api/server/middleware/validateMessageReq.js` - Solid storage validation; no MongoDB fallback for Solid users (404 on Solid failure)
-- `api/server/middleware/requireJwtAuth.js` - Removed debug auth logging (per PR review)
+- `api/server/middleware/requireJwtAuth.js` - Removed debug auth logging (per PR review); use solidJwt/openidJwt by token_provider
 - `api/server/routes/config.js` - `openidLoginEnabled: isOpenIdEnabled` only so Solid-only shows one button (per PR review)
 - `api/server/routes/messages.js` - Solid message reads return 503 on Solid failure (no MongoDB fallback)
 - `api/server/services/Endpoints/agents/initialize.js` - Enhanced model discovery from request body and endpointOption
@@ -236,7 +256,7 @@ None currently identified.
 - `packages/data-schemas/src/schema/share.ts` - Added `podUrl` field to `ISharedLink` schema
 - `packages/data-schemas/src/types/share.ts` - Added `podUrl` field to `ISharedLink` interface
 - `api/server/routes/share.js` - Updated share routes to pass `req` object for Solid storage support
-- `api/strategies/SolidOpenidStrategy.js` - Updated to use `SOLID_OPENID_*` environment variables and register as 'openid' strategy
+- `api/strategies/SolidOpenidStrategy.js` - Updated to use `SOLID_OPENID_*` environment variables and register as 'solid' strategy; prompt=consent for refresh token support
 - `api/strategies/openidStrategy.js` - Generic OpenID strategy for non-Solid OpenID providers
 - `api/strategies/index.js` - Exported both `setupSolidOpenId` and `setupOpenId` functions
 - `api/server/socialLogins.js` - Added separate configuration functions for Solid and generic OpenID strategies
@@ -257,7 +277,7 @@ The following environment variables are required for the "Login with Solid" butt
 - `SOLID_OPENID_CLIENT_ID` - OAuth client ID for Solid authentication
 - `SOLID_OPENID_CLIENT_SECRET` - OAuth client secret for Solid authentication
 - `SOLID_OPENID_ISSUER` - Solid Pod provider URL (e.g., `http://localhost:3000/`)
-- `SOLID_OPENID_SCOPE` - OAuth scopes (typically `"openid webid"`)
+- `SOLID_OPENID_SCOPE` - OAuth scopes (use `"openid webid offline_access"` for refresh token support when the IdP supports it)
 - `SOLID_OPENID_SESSION_SECRET` - Secret key for session management
 - `SOLID_OPENID_CALLBACK_URL` - OAuth callback URL (typically `/oauth/openid/callback`)
 
@@ -288,6 +308,6 @@ The following environment variables are used for the generic "Login with OpenID"
 
 ---
 
-**Report Date**: February 10, 2026
+**Report Date**: February 25, 2026
 
 

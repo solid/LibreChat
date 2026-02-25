@@ -538,8 +538,9 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
       });
     }
 
-    /** Small cookie to indicate token provider (required for auth middleware) */
-    res.cookie('token_provider', 'openid', {
+    /** Small cookie to indicate token provider (required for auth middleware and refresh flow) */
+    const tokenProvider = req.user?.provider || 'openid';
+    res.cookie('token_provider', tokenProvider, {
       expires: expirationDate,
       httpOnly: true,
       secure: shouldUseSecureCookie(),
