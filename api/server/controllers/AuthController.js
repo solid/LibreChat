@@ -132,10 +132,70 @@ const refreshController = async (req, res) => {
         expires_at: claims.exp,
       };
 
-      return res.status(200).send({ token, user });
-    } catch (error) {
-      logger.error('[refreshController] OpenID token refresh error', error);
+    res.status(200).send({ token, user });
+    return true;
+  } catch (error) {
+    logger.error('[refreshController] OpenID token refresh error', error);
+    return false;
+  }
+}
+
+const refreshController = async (req, res) => {
+  const parsedCookies = req.headers.cookie ? cookies.parse(req.headers.cookie) : {};
+  const token_provider = parsedCookies.token_provider;
+
+  // Handle OpenID or Solid users with OPENID_REUSE_TOKENS enabled
+  const useOpenIDRefresh =
+    (token_provider === 'openid' || token_provider === 'solid') &&
+    isEnabled(process.env.OPENID_REUSE_TOKENS);
+
+  if (useOpenIDRefresh) {
+    const refreshToken = req.session?.openidTokens?.refreshToken || parsedCookies.refreshToken;
+
+    if (!refreshToken) {
+      // No refresh token (e.g. Solid IdP didn't return one) but we may have a valid session from the OAuth callback
+      const sessionToken =
+        req.session?.openidTokens?.idToken || req.session?.openidTokens?.accessToken;
+      if (sessionToken) {
+        try {
+          const payload = jwt.decode(sessionToken);
+          const sub = payload?.sub;
+          if (sub) {
+            const { user, error } = await findOpenIDUser({
+              findUser,
+              email: payload.email,
+              openidId: sub,
+              idOnTheSource: payload.oid,
+              strategyName: 'refreshController',
+            });
+            if (!error && user) {
+              const token = sessionToken;
+              logger.debug(
+                '[refreshController] Returning token from session (no refresh token available)',
+              );
+              return res.status(200).send({ token, user });
+            }
+          }
+        } catch (err) {
+          logger.debug('[refreshController] Session token decode/lookup failed', err.message);
+        }
+      }
+      logger.warn(
+        '[refreshController] No OpenID refresh token available, falling back to standard refresh',
+      );
+      return res.status(200).send('Refresh token not provided');
     }
+
+    const openIdConfig = token_provider === 'solid' ? getSolidOpenIdConfig() : getOpenIdConfig();
+    let refreshParams = {};
+    if (token_provider === 'solid' && process.env.SOLID_OPENID_SCOPE) {
+      refreshParams = { scope: process.env.SOLID_OPENID_SCOPE };
+    } else if (process.env.OPENID_SCOPE) {
+      refreshParams = { scope: process.env.OPENID_SCOPE };
+    }
+
+    const sent = await performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams);
+    if (sent) return;
   }
 
   /** For non-OpenID users or OpenID users without OPENID_REUSE_TOKENS, use standard JWT refresh */

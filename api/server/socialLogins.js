@@ -17,7 +17,7 @@ const {
 const { getLogStores } = require('~/cache');
 
 /**
-* Configures Solid OpenID Connect for the application.
+ * Configures Solid OpenID Connect for the application.
  * @param {Express.Application} app - The Express application instance.
  * @returns {Promise<void>}
  */
