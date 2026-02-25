@@ -253,12 +253,15 @@ describe('setOpenIDAuthTokens', () => {
       expect(result).toBeUndefined();
     });
 
-    it('should return undefined when no refresh token is available', () => {
+    it('should return id_token when no refresh token is available (session fallback)', () => {
       const tokenset = { access_token: 'access', id_token: 'id' };
       const req = mockRequest();
       const res = mockResponse();
       const result = setOpenIDAuthTokens(tokenset, req, res, 'user-123');
-      expect(result).toBeUndefined();
+      expect(result).toBe('id');
+      expect(req.session.openidTokens.accessToken).toBe('access');
+      expect(req.session.openidTokens.idToken).toBe('id');
+      expect(req.session.openidTokens.refreshToken).toBeUndefined();
     });
 
     it('should use existingRefreshToken when tokenset has no refresh_token', () => {
