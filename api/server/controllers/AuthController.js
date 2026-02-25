@@ -175,14 +175,13 @@ const refreshController = async (req, res) => {
       return res.status(200).send('Refresh token not provided');
     }
 
-    const openIdConfig =
-      token_provider === 'solid' ? getSolidOpenIdConfig() : getOpenIdConfig();
-    const refreshParams =
-      token_provider === 'solid' && process.env.SOLID_OPENID_SCOPE
-        ? { scope: process.env.SOLID_OPENID_SCOPE }
-        : process.env.OPENID_SCOPE
-          ? { scope: process.env.OPENID_SCOPE }
-          : {};
+    const openIdConfig = token_provider === 'solid' ? getSolidOpenIdConfig() : getOpenIdConfig();
+    let refreshParams = {};
+    if (token_provider === 'solid' && process.env.SOLID_OPENID_SCOPE) {
+      refreshParams = { scope: process.env.SOLID_OPENID_SCOPE };
+    } else if (process.env.OPENID_SCOPE) {
+      refreshParams = { scope: process.env.OPENID_SCOPE };
+    }
 
     const sent = await performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams);
     if (sent) return;
