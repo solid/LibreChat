@@ -53,7 +53,15 @@ function mockResponse() {
 /** Helper to build a mock Express request with session */
 function mockRequest(sessionData = {}) {
   return {
-    session: { openidTokens: null, ...sessionData },
+    session: {
+      openidTokens: null,
+      ...sessionData,
+      save: jest.fn((callback) => {
+        if (typeof callback === 'function') {
+          callback();
+        }
+      }),
+    },
   };
 }
 
