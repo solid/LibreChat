@@ -137,6 +137,11 @@ class CustomOpenIDStrategy extends OpenIDStrategy {
       logger.debug('[SolidOpenidStrategy] Generated nonce for federated provider:', nonce);
     }
 
+    /** Request consent so CSS/node-oidc-provider issues a refresh_token when offline_access is in scope */
+    if (!params.has('prompt')) {
+      params.set('prompt', 'consent');
+    }
+
     return params;
   }
 }

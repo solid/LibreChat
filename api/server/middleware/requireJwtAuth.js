@@ -10,9 +10,13 @@ const requireJwtAuth = (req, res, next) => {
   const cookieHeader = req.headers.cookie;
   const tokenProvider = cookieHeader ? cookies.parse(cookieHeader).token_provider : null;
 
-  // Use OpenID authentication if token provider is OpenID and OPENID_REUSE_TOKENS is enabled
-  if (tokenProvider === 'openid' && isEnabled(process.env.OPENID_REUSE_TOKENS)) {
-    return passport.authenticate('openidJwt', { session: false })(req, res, next);
+  // Use OpenID/Solid JWT authentication when OPENID_REUSE_TOKENS is enabled
+  if (
+    (tokenProvider === 'openid' || tokenProvider === 'solid') &&
+    isEnabled(process.env.OPENID_REUSE_TOKENS)
+  ) {
+    const strategy = tokenProvider === 'solid' ? 'solidJwt' : 'openidJwt';
+    return passport.authenticate(strategy, { session: false })(req, res, next);
   }
 
   // Default to standard JWT authentication
