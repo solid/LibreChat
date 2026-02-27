@@ -24,6 +24,22 @@ const { updateUser, findUser } = require('~/models');
  *
  * This enables seamless migration for existing users when SharePoint integration is enabled.
  */
+/**
+ * JWT extractor: Authorization Bearer first, then cookie openid_id_token (for OpenID/Solid when header not yet set by frontend).
+ * @param {import('express').Request} req
+ * @returns {string | null}
+ */
+function jwtFromRequest(req) {
+  const fromHeader = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+  if (fromHeader) return fromHeader;
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const parsed = cookies.parse(cookieHeader);
+    if (parsed.openid_id_token) return parsed.openid_id_token;
+  }
+  return null;
+}
+
 const openIdJwtLogin = (openIdConfig) => {
   let jwksRsaOptions = {
     cache: isEnabled(process.env.OPENID_JWKS_URL_CACHE_ENABLED) || true,
@@ -37,7 +53,7 @@ const openIdJwtLogin = (openIdConfig) => {
 
   return new JwtStrategy(
     {
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest,
       secretOrKeyProvider: jwksRsa.passportJwtSecret(jwksRsaOptions),
       passReqToCallback: true,
     },

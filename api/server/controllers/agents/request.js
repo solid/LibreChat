@@ -308,6 +308,24 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
         }
 
         if (!wasAbortedBeforeComplete) {
+          // Always save/update the final response message with complete text FIRST
+          // This ensures the message is persisted before we emit FINAL and complete the job
+          logger.debug('[ResumableAgentController] Saving final response message', {
+            messageId: response.messageId,
+            hasText: !!response.text,
+            textLength: response.text?.length || 0,
+            hasContent: !!response.content,
+            contentLength: Array.isArray(response.content) ? response.content.length : 0,
+            contentTypes: Array.isArray(response.content)
+              ? response.content.map((c) => c?.type).filter(Boolean)
+              : [],
+          });
+          await saveMessage(
+            req,
+            { ...response, user: userId },
+            { context: 'api/server/controllers/agents/request.js - resumable response end' },
+          );
+
           const finalEvent = {
             final: true,
             conversation,
@@ -316,35 +334,25 @@ const ResumableAgentController = async (req, res, next, initializeClient, addTit
             responseMessage: { ...response },
           };
 
-          logger.debug(`[ResumableAgentController] Emitting FINAL event`, {
-            streamId,
-            wasAbortedBeforeComplete,
-            userMessageId: userMessage?.messageId,
-            responseMessageId: response?.messageId,
-            conversationId: conversation?.conversationId,
-          });
-
-          await GenerationJobManager.emitDone(streamId, finalEvent);
-          GenerationJobManager.completeJob(streamId);
+          // Emit the final event to all subscribers
+          GenerationJobManager.emitDone(streamId, finalEvent);
           await decrementPendingRequest(userId);
+
+          // Complete the job AFTER emitting FINAL and saving messages
+          // This ensures the frontend receives the FINAL event while the job is still active
+          GenerationJobManager.completeJob(streamId);
         } else {
           const finalEvent = {
             final: true,
             conversation,
             title: conversation.title,
             requestMessage: sanitizeMessageForTransmit(userMessage),
-            responseMessage: { ...response, unfinished: true },
+            responseMessage: { ...response, error: true },
+            error: { message: 'Request was aborted' },
           };
-
-          logger.debug(`[ResumableAgentController] Emitting ABORTED FINAL event`, {
-            streamId,
-            wasAbortedBeforeComplete,
-            userMessageId: userMessage?.messageId,
-            responseMessageId: response?.messageId,
-            conversationId: conversation?.conversationId,
-          });
-
-          await GenerationJobManager.emitDone(streamId, finalEvent);
+          // Emit the final event to all subscribers first
+          GenerationJobManager.emitDone(streamId, finalEvent);
+          // Then complete the job to mark it as inactive
           GenerationJobManager.completeJob(streamId, 'Request aborted');
           await decrementPendingRequest(userId);
         }
@@ -625,7 +633,7 @@ const _LegacyAgentController = async (req, res, next, initializeClient, addTitle
     let response = await client.sendMessage(text, messageOptions);
 
     // Extract what we need and immediately break reference
-    const messageId = response.messageId;
+    const _messageId = response.messageId;
     const endpoint = endpointOption.endpoint;
     response.endpoint = endpoint;
 
@@ -665,14 +673,13 @@ const _LegacyAgentController = async (req, res, next, initializeClient, addTitle
       });
       res.end();
 
-      // Save the message if needed
-      if (client.savedMessageIds && !client.savedMessageIds.has(messageId)) {
-        await saveMessage(
-          req,
-          { ...finalResponse, user: userId },
-          { context: 'api/server/controllers/agents/request.js - response end' },
-        );
-      }
+      // Always save/update the final response message with complete text
+      // Even if it was saved initially, we need to update it with the final text content
+      await saveMessage(
+        req,
+        { ...finalResponse, user: userId },
+        { context: 'api/server/controllers/agents/request.js - response end' },
+      );
     }
     // Edge case: sendMessage completed but abort happened during sendCompletion
     // We need to ensure a final event is sent

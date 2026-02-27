@@ -11,7 +11,7 @@ const azureAssistants = require('~/server/services/Endpoints/azureAssistants');
 const assistants = require('~/server/services/Endpoints/assistants');
 const { getEndpointsConfig } = require('~/server/services/Config');
 const agents = require('~/server/services/Endpoints/agents');
-const { updateFilesUsage } = require('~/models');
+const { updateFilesUsage, getConvo } = require('~/models');
 
 const buildFunction = {
   [EModelEndpoint.agents]: agents.buildOptions,
@@ -86,6 +86,21 @@ async function buildEndpointOption(req, res, next) {
     const modelSpec = appConfig.modelSpecs.list.find((s) => s.name === parsedBody.spec);
     if (modelSpec?.iconURL) {
       parsedBody.iconURL = modelSpec.iconURL;
+    }
+  }
+
+  // If model is missing and we have a conversationId, load the conversation (Solid or MongoDB) to get the model
+  if (!parsedBody.model && req.body?.conversationId && req.body.conversationId !== 'new') {
+    try {
+      const conversation = await getConvo(req.user?.id, req.body.conversationId, req);
+      if (conversation?.model) {
+        parsedBody.model = conversation.model;
+      }
+    } catch (error) {
+      logger.warn('[buildEndpointOption] Could not load conversation to extract model', {
+        conversationId: req.body.conversationId,
+        error: error.message,
+      });
     }
   }
 

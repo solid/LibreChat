@@ -103,6 +103,12 @@ const startServer = async () => {
   app.use(cors());
   app.use(cookieParser());
 
+  // Configure social logins (including session middleware) BEFORE passport initialization
+  // This ensures sessions are available for all requests, including JWT-authenticated ones
+  if (isEnabled(ALLOW_SOCIAL_LOGIN)) {
+    await configureSocialLogins(app);
+  }
+
   if (!isEnabled(DISABLE_COMPRESSION)) {
     app.use(compression());
   } else {
@@ -125,10 +131,6 @@ const startServer = async () => {
   /* LDAP Auth */
   if (process.env.LDAP_URL && process.env.LDAP_USER_SEARCH_BASE) {
     passport.use(ldapLogin);
-  }
-
-  if (isEnabled(ALLOW_SOCIAL_LOGIN)) {
-    await configureSocialLogins(app);
   }
 
   app.use('/oauth', routes.oauth);
@@ -161,6 +163,27 @@ const startServer = async () => {
 
   app.use('/api/tags', routes.tags);
   app.use('/api/mcp', routes.mcp);
+
+  // Solid-OIDC Client ID Document route, see spec https://solidproject.org/TR/oidc#clientids-document
+  // Local CSS (and other Solid IdPs) fetch this URL to get redirect_uris; they must match the redirect_uri we send in the auth request.
+  app.get('/solid-client-id', (_, res) => {
+    const callbackPath =
+      process.env.SOLID_OPENID_CALLBACK_URL ||
+      process.env.OPENID_CALLBACK_URL ||
+      '/oauth/openid/callback';
+    const baseUrl = process.env.DOMAIN_SERVER || 'http://localhost:3080';
+    const clientId = `${baseUrl}/solid-client-id`;
+    res.set('Content-Type', 'application/ld+json');
+    res.send({
+      '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
+      client_id: clientId,
+      client_name: process.env.SOLID_OPENID_BUTTON_LABEL || 'LibreChat Solid Client',
+      redirect_uris: [baseUrl + callbackPath],
+      scope: process.env.SOLID_OPENID_SCOPE || 'openid webid offline_access',
+      grant_types: ['refresh_token', 'authorization_code'],
+      response_types: ['code'],
+    });
+  });
 
   app.use(ErrorController);
 

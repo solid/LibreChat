@@ -2,14 +2,34 @@ const { logger } = require('@librechat/data-schemas');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const { getMessages, deleteMessages } = require('./Message');
 const { Conversation } = require('~/db/models');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
+const {
+  getConvoFromSolid,
+  saveConvoToSolid,
+  getConvosByCursorFromSolid,
+  deleteConvosFromSolid,
+} = require('~/server/services/SolidStorage');
 
 /**
  * Searches for a conversation by conversationId and returns a lean document with only conversationId and user.
  * @param {string} conversationId - The conversation's ID.
+ * @param {Object} [req] - Optional request object for Solid storage support.
  * @returns {Promise<{conversationId: string, user: string} | null>} The conversation object with selected fields or null if not found.
  */
-const searchConversation = async (conversationId) => {
+const searchConversation = async (conversationId, req = null) => {
   try {
+    // Solid users: use Solid storage only; no MongoDB fallback
+    if (isSolidUser(req)) {
+      const convo = await getConvoFromSolid(req, conversationId);
+      if (convo) {
+        return {
+          conversationId: convo.conversationId,
+          user: convo.user,
+        };
+      }
+      return null;
+    }
+
     return await Conversation.findOne({ conversationId }, 'conversationId user').lean();
   } catch (error) {
     logger.error('[searchConversation] Error searching conversation', error);
@@ -21,9 +41,16 @@ const searchConversation = async (conversationId) => {
  * Retrieves a single conversation for a given user and conversation ID.
  * @param {string} user - The user's ID.
  * @param {string} conversationId - The conversation's ID.
+ * @param {Object} [req] - Optional request object for Solid storage support.
  * @returns {Promise<TConversation>} The conversation object.
  */
-const getConvo = async (user, conversationId) => {
+const getConvo = async (user, conversationId, req = null) => {
+  // Solid users: use Solid storage only; no MongoDB fallback
+  if (isSolidUser(req)) {
+    const convo = await getConvoFromSolid(req, conversationId);
+    return convo ?? null;
+  }
+
   try {
     return await Conversation.findOne({ user, conversationId }).lean();
   } catch (error) {
@@ -87,29 +114,56 @@ module.exports = {
    * @returns {Promise<TConversation>} The conversation object.
    */
   saveConvo: async (req, { conversationId, newConversationId, ...convo }, metadata) => {
-    try {
-      if (metadata?.context) {
-        logger.debug(`[saveConvo] ${metadata.context}`);
+    if (metadata?.context) {
+      logger.debug(`[saveConvo] ${metadata.context}`);
+    }
+
+    // Build shared payload: expiredAt and base convo fields
+    let expiredAt = null;
+    if (req?.body?.isTemporary) {
+      try {
+        const appConfig = req.config;
+        expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+      } catch (err) {
+        logger.error('Error creating temporary chat expiration date:', err);
+        logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
       }
+    }
+    const baseConvo = {
+      conversationId,
+      newConversationId,
+      ...convo,
+      expiredAt,
+    };
 
+    if (isSolidUser(req)) {
+      try {
+        // Full document aligned with schema (same shape as MongoDB); SolidStorage adds messages + timestamps
+        const finalConversationId = newConversationId || conversationId;
+        const convoDocument = {
+          ...baseConvo,
+          conversationId: finalConversationId,
+          user: req.user.id,
+        };
+        if (newConversationId && newConversationId !== conversationId) {
+          convoDocument.previousConversationId = conversationId;
+        }
+        const savedConvo = await saveConvoToSolid(req, convoDocument, metadata);
+        return savedConvo;
+      } catch (error) {
+        logger.error('[saveConvo] Error saving conversation to Solid Pod', error);
+        if (metadata && metadata?.context) {
+          logger.info(`[saveConvo] ${metadata.context}`);
+        }
+        throw error;
+      }
+    }
+
+    try {
       const messages = await getMessages({ conversationId }, '_id');
-      const update = { ...convo, messages, user: req.user.id };
-
+      const update = { ...convo, messages, user: req.user.id, expiredAt };
       if (newConversationId) {
         update.conversationId = newConversationId;
-      }
-
-      if (req?.body?.isTemporary) {
-        try {
-          const appConfig = req.config;
-          update.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-        } catch (err) {
-          logger.error('Error creating temporary chat expiration date:', err);
-          logger.info(`---\`saveConvo\` context: ${metadata?.context}`);
-          update.expiredAt = null;
-        }
-      } else {
-        update.expiredAt = null;
       }
 
       /** @type {{ $set: Partial<TConversation>; $unset?: Record<keyof TConversation, number> }} */
@@ -122,10 +176,7 @@ module.exports = {
       const conversation = await Conversation.findOneAndUpdate(
         { conversationId, user: req.user.id },
         updateOperation,
-        {
-          new: true,
-          upsert: metadata?.noUpsert !== true,
-        },
+        { new: true, upsert: metadata?.noUpsert !== true },
       );
 
       if (!conversation) {
@@ -170,8 +221,20 @@ module.exports = {
       search,
       sortBy = 'updatedAt',
       sortDirection = 'desc',
+      req, // Optional req object for Solid storage
     } = {},
   ) => {
+    if (isSolidUser(req)) {
+      return await getConvosByCursorFromSolid(req, {
+        cursor,
+        limit,
+        isArchived,
+        tags,
+        search,
+        sortBy,
+        sortDirection,
+      });
+    }
     const filters = [{ user }];
     if (isArchived) {
       filters.push({ isArchived: true });
@@ -228,7 +291,7 @@ module.exports = {
             },
           ],
         };
-      } catch (err) {
+      } catch (_err) {
         logger.warn('[getConvosByCursor] Invalid cursor format, starting from beginning');
       }
       if (cursorFilter) {
@@ -337,6 +400,7 @@ module.exports = {
    * @function
    * @param {string|ObjectId} user - The user's ID.
    * @param {Object} filter - Additional filter criteria for the conversations to be deleted.
+   * @param {Object} [req] - Optional Express request object for Solid storage support.
    * @returns {Promise<{ n: number, ok: number, deletedCount: number, messages: { n: number, ok: number, deletedCount: number } }>}
    *          An object containing the count of deleted conversations and associated messages.
    * @throws {Error} Throws an error if there's an issue with the database operations.
@@ -347,7 +411,71 @@ module.exports = {
    * const result = await deleteConvos(user, filter);
    * logger.error(result); // { n: 5, ok: 1, deletedCount: 5, messages: { n: 10, ok: 1, deletedCount: 10 } }
    */
-  deleteConvos: async (user, filter) => {
+  deleteConvos: async (user, filter, req = null) => {
+    // Use Solid storage when user logged in via "Continue with Solid"
+    if (isSolidUser(req)) {
+      try {
+        let conversationIds = [];
+
+        // If conversationId is specified in filter, use it directly
+        if (filter.conversationId) {
+          conversationIds = [filter.conversationId];
+        } else {
+          // Otherwise, get all conversations matching the filter from Solid Pod
+          // For now, we'll get all conversations and filter in memory
+          // This is not ideal for large datasets, but Solid Pod doesn't support complex queries
+          const allConversations = await getConvosByCursorFromSolid(req, {
+            limit: 10000, // Large limit to get all conversations
+            isArchived: filter.isArchived,
+          });
+
+          // Filter conversations based on the filter criteria
+          let filteredConversations = allConversations.conversations;
+
+          if (filter.conversationId) {
+            filteredConversations = filteredConversations.filter(
+              (c) => c.conversationId === filter.conversationId,
+            );
+          }
+
+          if (filter.endpoint) {
+            filteredConversations = filteredConversations.filter(
+              (c) => c.endpoint === filter.endpoint,
+            );
+          }
+
+          conversationIds = filteredConversations.map((c) => c.conversationId);
+        }
+
+        if (!conversationIds.length) {
+          throw new Error('Conversation not found or already deleted.');
+        }
+
+        const deletedCount = await deleteConvosFromSolid(req, conversationIds);
+
+        // Return format similar to MongoDB deleteMany result
+        return {
+          n: deletedCount,
+          ok: deletedCount > 0 ? 1 : 0,
+          deletedCount,
+          messages: {
+            n: deletedCount, // Messages are deleted as part of deleteConvosFromSolid
+            ok: deletedCount > 0 ? 1 : 0,
+            deletedCount,
+          },
+        };
+      } catch (error) {
+        logger.error('[deleteConvos] Error deleting conversations from Solid Pod', {
+          error: error.message,
+          stack: error.stack,
+          filter,
+          userId: user,
+        });
+        throw error;
+      }
+    }
+
+    // MongoDB storage (original code)
     try {
       const userFilter = { ...filter, user };
       const conversations = await Conversation.find(userFilter).select('conversationId');

@@ -5,6 +5,10 @@ import type { SchemaWithMeiliMethods } from '~/models/plugins/mongoMeili';
 import type * as t from '~/types';
 import logger from '~/config/winston';
 
+// Solid storage and auth helpers – required at runtime when share methods run in api server context
+const getSolidStorage = () => require('~/server/services/SolidStorage');
+const getIsSolidUser = () => require('~/server/utils/isSolidUser').isSolidUser;
+
 class ShareServiceError extends Error {
   code: string;
   constructor(message: string, code: string) {
@@ -162,6 +166,55 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
     try {
       const SharedLink = mongoose.models.SharedLink as Model<t.ISharedLink>;
       const share = (await SharedLink.findOne({ shareId, isPublic: true })
+        .select('-_id -__v -user')
+        .lean()) as t.ISharedLink | null;
+
+      if (!share?.conversationId || !share.isPublic) {
+        return null;
+      }
+
+      // Check if this is a Solid share (has podUrl)
+      if (share.podUrl) {
+        // Get shared messages from Solid Pod
+        try {
+          const { getSharedMessagesFromSolid } = getSolidStorage();
+          const solidShare = await getSharedMessagesFromSolid(
+            shareId,
+            share.conversationId,
+            share.podUrl,
+            share.targetMessageId,
+          );
+
+          if (!solidShare) {
+            return null;
+          }
+
+          // Anonymize the conversation and messages
+          const newConvoId = anonymizeConvoId(solidShare.conversationId);
+          const result: t.SharedMessagesResult = {
+            shareId: solidShare.shareId || shareId,
+            title: solidShare.title,
+            isPublic: solidShare.isPublic,
+            createdAt: solidShare.createdAt,
+            updatedAt: solidShare.updatedAt,
+            conversationId: newConvoId,
+            messages: anonymizeMessages(solidShare.messages, newConvoId),
+          };
+
+          return result;
+        } catch (error) {
+          logger.error('[getSharedMessages] Error getting shared messages from Solid Pod', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            shareId,
+            conversationId: share.conversationId,
+            podUrl: share.podUrl,
+          });
+          return null;
+        }
+      }
+
+      // MongoDB share - use existing logic (separate query with populate to get messages)
+      const shareWithMessages = (await SharedLink.findOne({ shareId, isPublic: true })
         .populate({
           path: 'messages',
           select: '-_id -__v -user',
@@ -169,23 +222,26 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
         .select('-_id -__v -user')
         .lean()) as (t.ISharedLink & { messages: t.IMessage[] }) | null;
 
-      if (!share?.conversationId || !share.isPublic) {
+      if (!shareWithMessages?.messages) {
         return null;
       }
 
       /** Filtered messages based on targetMessageId if present (branch-specific sharing) */
-      let messagesToShare: t.IMessage[] = share.messages;
-      if (share.targetMessageId) {
-        messagesToShare = getMessagesUpToTarget(share.messages, share.targetMessageId);
+      let messagesToShare: t.IMessage[] = shareWithMessages.messages;
+      if (shareWithMessages.targetMessageId) {
+        messagesToShare = getMessagesUpToTarget(
+          shareWithMessages.messages,
+          shareWithMessages.targetMessageId,
+        );
       }
 
-      const newConvoId = anonymizeConvoId(share.conversationId);
+      const newConvoId = anonymizeConvoId(shareWithMessages.conversationId);
       const result: t.SharedMessagesResult = {
-        shareId: share.shareId || shareId,
-        title: share.title,
-        isPublic: share.isPublic,
-        createdAt: share.createdAt,
-        updatedAt: share.updatedAt,
+        shareId: shareWithMessages.shareId || shareId,
+        title: shareWithMessages.title,
+        isPublic: shareWithMessages.isPublic,
+        createdAt: shareWithMessages.createdAt,
+        updatedAt: shareWithMessages.updatedAt,
         conversationId: newConvoId,
         messages: anonymizeMessages(messagesToShare, newConvoId),
       };
@@ -316,6 +372,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
   async function deleteConvoSharedLink(
     user: string,
     conversationId: string,
+    req?: any, // Optional Express request object for Solid storage support
   ): Promise<t.DeleteAllSharesResult> {
     if (!user || !conversationId) {
       throw new ShareServiceError('Missing required parameters', 'INVALID_PARAMS');
@@ -323,6 +380,36 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
 
     try {
       const SharedLink = mongoose.models.SharedLink as Model<t.ISharedLink>;
+
+      // Find all shares for this conversation to check if any are Solid shares
+      const shares = await SharedLink.find({ user, conversationId }).lean();
+
+      // If any shares are Solid shares, remove public access (user logged in via "Continue with Solid")
+      if (req) {
+        if (getIsSolidUser()(req)) {
+          const solidShares = shares.filter((share) => share.podUrl);
+          for (const share of solidShares) {
+            try {
+              const { removePublicAccessForShare } = getSolidStorage();
+              await removePublicAccessForShare(req, conversationId);
+              logger.info('[deleteConvoSharedLink] Public access removed for Solid share', {
+                shareId: share.shareId,
+                conversationId,
+              });
+              // Only need to remove access once per conversation
+              break;
+            } catch (error) {
+              logger.error('[deleteConvoSharedLink] Error removing public access for Solid share', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                shareId: share.shareId,
+                conversationId,
+              });
+              // Continue with deletion even if removing public access fails
+            }
+          }
+        }
+      }
+
       const result = await SharedLink.deleteMany({ user, conversationId });
       return {
         message: 'Shared links deleted successfully',
@@ -345,6 +432,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
     user: string,
     conversationId: string,
     targetMessageId?: string,
+    req?: any, // Optional Express request object for Solid storage support
   ): Promise<t.CreateShareResult> {
     if (!user || !conversationId) {
       throw new ShareServiceError('Missing required parameters', 'INVALID_PARAMS');
@@ -354,61 +442,228 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
       const SharedLink = mongoose.models.SharedLink as Model<t.ISharedLink>;
       const Conversation = mongoose.models.Conversation as SchemaWithMeiliMethods;
 
-      const [existingShare, conversationMessages] = await Promise.all([
-        SharedLink.findOne({
+      // Check if this is a Solid user (logged in via "Continue with Solid")
+      let conversation;
+      let conversationMessages;
+      let podUrl: string | undefined;
+
+      if (req && getIsSolidUser()(req)) {
+        logger.info('[createSharedLink] Detected Solid user, using Solid storage path');
+        // Check for existing share first (same as MongoDB)
+        const existingShare = (await SharedLink.findOne({
           conversationId,
           user,
           isPublic: true,
           ...(targetMessageId && { targetMessageId }),
         })
           .select('-_id -__v -user')
-          .lean() as Promise<t.ISharedLink | null>,
-        Message.find({ conversationId, user }).sort({ createdAt: 1 }).lean(),
-      ]);
+          .lean()) as t.ISharedLink | null;
 
-      if (existingShare && existingShare.isPublic) {
-        logger.error('[createSharedLink] Share already exists', {
-          user,
-          conversationId,
-          targetMessageId,
-        });
-        throw new ShareServiceError('Share already exists', 'SHARE_EXISTS');
-      } else if (existingShare) {
-        await SharedLink.deleteOne({
-          conversationId,
-          user,
-          ...(targetMessageId && { targetMessageId }),
-        });
-      }
+        if (existingShare && existingShare.isPublic) {
+          logger.error('[createSharedLink] Share already exists', {
+            user,
+            conversationId,
+            targetMessageId,
+          });
+          throw new ShareServiceError('Share already exists', 'SHARE_EXISTS');
+        } else if (existingShare) {
+          await SharedLink.deleteOne({
+            conversationId,
+            user,
+            ...(targetMessageId && { targetMessageId }),
+          });
+        }
 
-      const conversation = (await Conversation.findOne({ conversationId, user }).lean()) as {
-        title?: string;
-      } | null;
+        // For Solid users, get conversation and messages from Solid Pod
+        try {
+          logger.info('[createSharedLink] Starting Solid share creation', {
+            user,
+            conversationId,
+            userId: req.user?.id,
+            openidId: req.user?.openidId,
+          });
 
-      // Check if user owns the conversation
-      if (!conversation) {
-        throw new ShareServiceError(
-          'Conversation not found or access denied',
-          'CONVERSATION_NOT_FOUND',
-        );
-      }
+          const { getConvoFromSolid, getMessagesFromSolid, getPodUrl, getSolidFetch } =
+            getSolidStorage();
+          const authenticatedFetch = await getSolidFetch(req);
 
-      // Check if there are any messages to share
-      if (!conversationMessages || conversationMessages.length === 0) {
-        throw new ShareServiceError('No messages to share', 'NO_MESSAGES');
+          // Get Pod URL
+          podUrl = await getPodUrl(req.user.openidId, authenticatedFetch);
+          logger.info('[createSharedLink] Pod URL retrieved', {
+            podUrl,
+            conversationId,
+          });
+
+          // Get conversation from Solid
+          try {
+            logger.info('[createSharedLink] Getting conversation from Solid Pod', {
+              user,
+              conversationId,
+              podUrl,
+              userId: req.user?.id,
+              openidId: req.user?.openidId,
+            });
+            conversation = await getConvoFromSolid(req, conversationId);
+            if (!conversation) {
+              logger.error(
+                '[createSharedLink] Conversation not found in Solid Pod (returned null)',
+                {
+                  user,
+                  conversationId,
+                  podUrl,
+                  userId: req.user?.id,
+                  openidId: req.user?.openidId,
+                  userIdType: typeof req.user?.id,
+                },
+              );
+              throw new ShareServiceError(
+                'Conversation not found or access denied',
+                'CONVERSATION_NOT_FOUND',
+              );
+            }
+            logger.info('[createSharedLink] Conversation retrieved from Solid Pod', {
+              conversationId,
+              hasTitle: !!conversation.title,
+              conversationUserId: conversation.user,
+              conversationUserIdType: typeof conversation.user,
+              requestUserId: req.user?.id,
+              requestUserIdType: typeof req.user?.id,
+              userIdsMatch: String(conversation.user) === String(req.user?.id),
+            });
+          } catch (convoError) {
+            if (convoError instanceof ShareServiceError) {
+              throw convoError;
+            }
+            logger.error('[createSharedLink] Error calling getConvoFromSolid', {
+              error: convoError instanceof Error ? convoError.message : 'Unknown error',
+              errorStack: convoError instanceof Error ? convoError.stack : undefined,
+              errorName: convoError instanceof Error ? convoError.name : undefined,
+              user,
+              conversationId,
+              podUrl,
+              userId: req.user?.id,
+              openidId: req.user?.openidId,
+            });
+            throw new ShareServiceError(
+              'Conversation not found or access denied',
+              'CONVERSATION_NOT_FOUND',
+            );
+          }
+
+          // Get messages from Solid
+          conversationMessages = await getMessagesFromSolid(req, conversationId);
+          if (!conversationMessages || conversationMessages.length === 0) {
+            logger.error('[createSharedLink] No messages found in Solid Pod', {
+              user,
+              conversationId,
+            });
+            throw new ShareServiceError('No messages to share', 'NO_MESSAGES');
+          }
+        } catch (error) {
+          if (error instanceof ShareServiceError) {
+            throw error;
+          }
+          logger.error('[createSharedLink] Error getting conversation/messages from Solid Pod', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            errorStack: error instanceof Error ? error.stack : undefined,
+            user,
+            conversationId,
+          });
+          throw new ShareServiceError('Error accessing Solid Pod', 'SOLID_ACCESS_ERROR');
+        }
+      } else {
+        // For MongoDB users, use existing logic
+        const [existingShare, mongoMessages] = await Promise.all([
+          SharedLink.findOne({
+            conversationId,
+            user,
+            isPublic: true,
+            ...(targetMessageId && { targetMessageId }),
+          })
+            .select('-_id -__v -user')
+            .lean() as Promise<t.ISharedLink | null>,
+          Message.find({ conversationId, user }).sort({ createdAt: 1 }).lean(),
+        ]);
+
+        if (existingShare && existingShare.isPublic) {
+          logger.error('[createSharedLink] Share already exists', {
+            user,
+            conversationId,
+            targetMessageId,
+          });
+          throw new ShareServiceError('Share already exists', 'SHARE_EXISTS');
+        } else if (existingShare) {
+          await SharedLink.deleteOne({
+            conversationId,
+            user,
+            ...(targetMessageId && { targetMessageId }),
+          });
+        }
+
+        conversation = (await Conversation.findOne({ conversationId, user }).lean()) as {
+          title?: string;
+        } | null;
+
+        // Check if user owns the conversation
+        if (!conversation) {
+          throw new ShareServiceError(
+            'Conversation not found or access denied',
+            'CONVERSATION_NOT_FOUND',
+          );
+        }
+
+        // Check if there are any messages to share
+        if (!mongoMessages || mongoMessages.length === 0) {
+          throw new ShareServiceError('No messages to share', 'NO_MESSAGES');
+        }
+
+        conversationMessages = mongoMessages;
       }
 
       const title = conversation.title || 'Untitled';
 
       const shareId = nanoid();
-      await SharedLink.create({
+
+      // Create SharedLink with podUrl if Solid user
+      const sharedLinkData: any = {
         shareId,
         conversationId,
-        messages: conversationMessages,
         title,
         user,
         ...(targetMessageId && { targetMessageId }),
-      });
+      };
+
+      if (podUrl) {
+        sharedLinkData.podUrl = podUrl;
+        // For Solid, we don't store message ObjectIds, but we still need the array for schema compatibility
+        sharedLinkData.messages = [];
+      } else {
+        // For MongoDB, store message ObjectIds
+        sharedLinkData.messages = conversationMessages;
+      }
+
+      await SharedLink.create(sharedLinkData);
+
+      // For Solid users, set public access on conversation and messages
+      if (req && podUrl) {
+        try {
+          const { setPublicAccessForShare } = getSolidStorage();
+          await setPublicAccessForShare(req, conversationId);
+          logger.info('[createSharedLink] Public access set for Solid share', {
+            shareId,
+            conversationId,
+          });
+        } catch (error) {
+          logger.error('[createSharedLink] Error setting public access for Solid share', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            shareId,
+            conversationId,
+          });
+          // Delete the SharedLink if setting public access fails
+          await SharedLink.deleteOne({ shareId });
+          throw new ShareServiceError('Error setting public access', 'SOLID_ACCESS_ERROR');
+        }
+      }
 
       return { shareId, conversationId };
     } catch (error) {
@@ -519,6 +774,7 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
   async function deleteSharedLink(
     user: string,
     shareId: string,
+    req?: any, // Optional Express request object for Solid storage support
   ): Promise<t.DeleteShareResult | null> {
     if (!user || !shareId) {
       throw new ShareServiceError('Missing required parameters', 'INVALID_PARAMS');
@@ -526,6 +782,32 @@ export function createShareMethods(mongoose: typeof import('mongoose')) {
 
     try {
       const SharedLink = mongoose.models.SharedLink as Model<t.ISharedLink>;
+      const share = await SharedLink.findOne({ shareId, user }).lean();
+
+      if (!share) {
+        return null;
+      }
+
+      // If this is a Solid share, remove public access before deleting
+      if (share.podUrl && req) {
+        try {
+          const { removePublicAccessForShare } = getSolidStorage();
+          await removePublicAccessForShare(req, share.conversationId);
+          logger.info('[deleteSharedLink] Public access removed for Solid share', {
+            shareId,
+            conversationId: share.conversationId,
+          });
+        } catch (error) {
+          logger.error('[deleteSharedLink] Error removing public access for Solid share', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            shareId,
+            conversationId: share.conversationId,
+          });
+          // Continue with deletion even if removing public access fails
+        }
+      }
+
+      // Delete the SharedLink
       const result = await SharedLink.findOneAndDelete({ shareId, user }).lean();
 
       if (!result) {
