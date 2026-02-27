@@ -10,6 +10,7 @@ import {
 } from '@librechat/client';
 
 import SocialButton from './SocialButton';
+import SolidLoginButton from './SolidLoginButton';
 
 import { useLocalize, TranslationKeys } from '~/hooks';
 
@@ -100,11 +101,10 @@ function SocialLoginRender({
       />
     ),
     solid: startupConfig.solidLoginEnabled && (
-      <SocialButton
+      <SolidLoginButton
         key="solid"
-        enabled={startupConfig.solidLoginEnabled}
-        serverDomain={startupConfig.serverDomain}
-        oauthPath="openid"
+        startupConfig={startupConfig}
+        label={startupConfig.solidLabel}
         Icon={() =>
           startupConfig.solidImageUrl ? (
             <img src={startupConfig.solidImageUrl} alt="Solid Logo" className="h-5 w-5" />
@@ -112,8 +112,6 @@ function SocialLoginRender({
             <SolidIcon />
           )
         }
-        label={startupConfig.solidLabel}
-        id="solid"
       />
     ),
     saml: startupConfig.samlLoginEnabled && (

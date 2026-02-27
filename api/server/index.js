@@ -165,19 +165,21 @@ const startServer = async () => {
   app.use('/api/mcp', routes.mcp);
 
   // Solid-OIDC Client ID Document route, see spec https://solidproject.org/TR/oidc#clientids-document
-  // TODO: Expose this route only if adequate according to config, i.e. when Solid-OIDC is in use
-  // TODO: Follow 'app.use' pattern instead of inlining route here
-  // TODO: Make path configurable instead of hardcoding here
+  // Local CSS (and other Solid IdPs) fetch this URL to get redirect_uris; they must match the redirect_uri we send in the auth request.
   app.get('/solid-client-id', (_, res) => {
-    // TODO: Use constants/enums for header name and value if available from framework
+    const callbackPath =
+      process.env.SOLID_OPENID_CALLBACK_URL || process.env.OPENID_CALLBACK_URL || '/oauth/openid/callback';
+    const baseUrl = process.env.DOMAIN_SERVER || 'http://localhost:3080';
+    const clientId = `${baseUrl}/solid-client-id`;
     res.set('Content-Type', 'application/ld+json');
-
     res.send({
       '@context': ['https://www.w3.org/ns/solid/oidc-context.jsonld'],
-      redirect_uris: [process.env.DOMAIN_SERVER + process.env.OPENID_CALLBACK_URL],
-
-      // TODO: Don't hardcode path
-      client_id: process.env.DOMAIN_SERVER + '/solid-client-id',
+      client_id: clientId,
+      client_name: process.env.SOLID_OPENID_BUTTON_LABEL || 'LibreChat Solid Client',
+      redirect_uris: [baseUrl + callbackPath],
+      scope: process.env.SOLID_OPENID_SCOPE || 'openid webid offline_access',
+      grant_types: ['refresh_token', 'authorization_code'],
+      response_types: ['code'],
     });
   });
 

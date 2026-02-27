@@ -488,6 +488,16 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         expiresAt: expirationDate.getTime(),
       };
 
+      // Set id_token cookie as well so first API request (before frontend refresh sets Authorization header) can authenticate
+      if (tokenset.id_token) {
+        res.cookie('openid_id_token', tokenset.id_token, {
+          expires: expirationDate,
+          httpOnly: true,
+          secure: shouldUseSecureCookie(),
+          sameSite: 'strict',
+        });
+      }
+
       // Explicitly save the session to ensure it persists
       req.session.save((err) => {
         if (err) {

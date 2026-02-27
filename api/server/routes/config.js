@@ -3,6 +3,12 @@ const { logger } = require('@librechat/data-schemas');
 const { isEnabled, getBalanceConfig } = require('@librechat/api');
 const { Constants, CacheKeys, defaultSocialLogins } = require('librechat-data-provider');
 const { getLdapConfig } = require('~/server/services/Config/ldap');
+const {
+  getSolidOpenIdProviders,
+  isSolidOpenIdEnabled,
+  normalizeIssuer,
+  DEFAULT_ISSUER_OPTIONS,
+} = require('~/server/services/Config/solidOpenId');
 const { getAppConfig } = require('~/server/services/Config/app');
 const { getProjectByName } = require('~/models/Project');
 const { getLogStores } = require('~/cache');
@@ -49,10 +55,7 @@ router.get('/', async function (req, res) {
       !!process.env.OPENID_ISSUER &&
       !!process.env.OPENID_SESSION_SECRET;
 
-    const isSolidEnabled =
-      !!process.env.SOLID_OPENID_CLIENT_ID &&
-      !!process.env.SOLID_OPENID_ISSUER &&
-      !!process.env.SOLID_OPENID_SESSION_SECRET;
+    const isSolidEnabled = isSolidOpenIdEnabled();
 
     const isSamlEnabled =
       !!process.env.SAML_ENTRY_POINT &&
@@ -89,6 +92,20 @@ router.get('/', async function (req, res) {
       solidLabel: process.env.SOLID_OPENID_BUTTON_LABEL || 'Continue with Solid',
       solidImageUrl: process.env.SOLID_OPENID_IMAGE_URL,
       solidAutoRedirect: isEnabled(process.env.SOLID_OPENID_AUTO_REDIRECT),
+      solidIdpOptions: isSolidEnabled
+        ? [
+            ...DEFAULT_ISSUER_OPTIONS,
+            ...getSolidOpenIdProviders()
+              .filter(
+                (p) =>
+                  !DEFAULT_ISSUER_OPTIONS.some(
+                    (d) => normalizeIssuer(d.issuer) === p.issuer,
+                  ),
+              )
+              .map((p) => ({ issuer: p.issuer, label: p.label })),
+          ]
+        : [],
+      solidCustomEnabled: !!process.env.SOLID_OPENID_CUSTOM_CLIENT_ID,
       samlLoginEnabled: !isOpenIdEnabled && isSamlEnabled,
       samlLabel: process.env.SAML_BUTTON_LABEL,
       samlImageUrl: process.env.SAML_IMAGE_URL,

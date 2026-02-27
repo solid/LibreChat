@@ -7,6 +7,10 @@ const { ErrorTypes } = require('librechat-data-provider');
 const { createSetBalanceConfig, isEnabled } = require('@librechat/api');
 const { checkDomainAllowed, loginLimiter, logHeaders, checkBan } = require('~/server/middleware');
 const { createOAuthHandler: _createOAuthHandler } = require('~/server/controllers/auth/oauth');
+const {
+  startSolidOpenIdFlow,
+  handleSolidOpenIdCallback,
+} = require('~/server/controllers/auth/solidOpenIdDynamic');
 const { setAuthTokens, setOpenIDAuthTokens } = require('~/server/services/AuthService');
 const { syncUserEntraGroupMemberships } = require('~/server/services/PermissionService');
 const { startBaseStructureAfterLogin } = require('~/server/services/SolidStorage');
@@ -144,8 +148,9 @@ router.get(
 
 /**
  * OpenID Routes
+ * When ?issuer= is present, use dynamic Solid multi-issuer flow; otherwise Passport (single-issuer or generic OpenID).
  */
-router.get('/openid', (req, res, next) => {
+router.get('/openid', startSolidOpenIdFlow, (req, res, next) => {
   return passport.authenticate('openid', {
     session: false,
     state: randomState(),
@@ -174,6 +179,7 @@ const logAuthorizationCode = (req, res, next) => {
   } else if (error) {
     logger.warn('[OpenID Callback] OAuth error received (no authorization code)', {
       error,
+      error_description: req.query.error_description,
       state: state || 'not provided',
     });
   } else {
@@ -188,11 +194,17 @@ const logAuthorizationCode = (req, res, next) => {
 router.get(
   '/openid/callback',
   logAuthorizationCode,
-  passport.authenticate('openid', {
-    failureRedirect: `${domains.client}/oauth/error`,
-    failureMessage: true,
-    session: false,
-  }),
+  handleSolidOpenIdCallback,
+  (req, res, next) => {
+    if (req.user) {
+      return next();
+    }
+    return passport.authenticate('openid', {
+      failureRedirect: `${domains.client}/oauth/error`,
+      failureMessage: true,
+      session: false,
+    })(req, res, next);
+  },
   setBalanceConfig,
   checkDomainAllowed,
   oauthHandler,

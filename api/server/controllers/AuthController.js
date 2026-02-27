@@ -71,9 +71,10 @@ const resetPasswordController = async (req, res) => {
  * @param {Object} openIdConfig - Issuer config from getOpenIdConfig() or getSolidOpenIdConfig()
  * @param {string} refreshToken - Refresh token from session or cookie
  * @param {Record<string, string>} [refreshParams] - Optional params for token endpoint (e.g. { scope: process.env.SOLID_OPENID_SCOPE })
+ * @param {string} [tokenProvider] - 'solid' or 'openid' from cookie so setOpenIDAuthTokens sets the correct token_provider cookie
  * @returns {Promise<boolean>} True if response was sent, false if caller should continue to next handler
  */
-async function performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams = {}) {
+async function performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams = {}, tokenProvider) {
   try {
     const tokenset = await openIdClient.refreshTokenGrant(
       openIdConfig,
@@ -110,6 +111,12 @@ async function performOpenIDRefresh(req, res, openIdConfig, refreshToken, refres
       logger.info(
         `[refreshController] Updated user ${user.email} openidId (${reason}): ${user.openidId ?? 'null'} -> ${claims.sub}`,
       );
+    }
+
+    // setOpenIDAuthTokens sets token_provider cookie correctly (solid vs openid)
+    req.user = user;
+    if (tokenProvider) {
+      user.provider = user.provider || tokenProvider;
     }
 
     const token = setOpenIDAuthTokens(tokenset, req, res, user._id.toString(), refreshToken);
@@ -175,7 +182,53 @@ const refreshController = async (req, res) => {
       return res.status(200).send('Refresh token not provided');
     }
 
-    const openIdConfig = token_provider === 'solid' ? getSolidOpenIdConfig() : getOpenIdConfig();
+    const openIdConfig =
+      token_provider === 'solid'
+        ? (() => {
+            try {
+              return getSolidOpenIdConfig();
+            } catch (e) {
+              logger.warn('[refreshController] Solid OpenID config not initialized', {
+                message: e?.message,
+              });
+              return null;
+            }
+          })()
+        : (() => {
+            try {
+              return getOpenIdConfig();
+            } catch (e) {
+              logger.warn('[refreshController] OpenID config not initialized', { message: e?.message });
+              return null;
+            }
+          })();
+
+    if (!openIdConfig) {
+      const sessionToken =
+        req.session?.openidTokens?.idToken || req.session?.openidTokens?.accessToken;
+      if (sessionToken) {
+        try {
+          const payload = jwt.decode(sessionToken);
+          const sub = payload?.sub;
+          if (sub) {
+            const { user, error } = await findOpenIDUser({
+              findUser,
+              email: payload.email,
+              openidId: sub,
+              idOnTheSource: payload.oid,
+              strategyName: 'refreshController',
+            });
+            if (!error && user) {
+              return res.status(200).send({ token: sessionToken, user });
+            }
+          }
+        } catch (err) {
+          logger.debug('[refreshController] Session token decode/lookup failed', err.message);
+        }
+      }
+      return res.status(200).send('Refresh token not provided');
+    }
+
     let refreshParams = {};
     if (token_provider === 'solid' && process.env.SOLID_OPENID_SCOPE) {
       refreshParams = { scope: process.env.SOLID_OPENID_SCOPE };
@@ -183,7 +236,14 @@ const refreshController = async (req, res) => {
       refreshParams = { scope: process.env.OPENID_SCOPE };
     }
 
-    const sent = await performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams);
+    const sent = await performOpenIDRefresh(
+      req,
+      res,
+      openIdConfig,
+      refreshToken,
+      refreshParams,
+      token_provider,
+    );
     if (sent) return;
   }
 
