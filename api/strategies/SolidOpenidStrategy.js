@@ -496,7 +496,7 @@ async function verifySolidUser(tokenset, openidConfig) {
  * @function setupSolidOpenId
  * @returns {Promise<Configuration | null>}
  */
-async function setupSolidOpenId() {
+async function _setupSolidOpenId() {
   try {
     const shouldGenerateNonce = isEnabled(process.env.OPENID_GENERATE_NONCE);
 
@@ -524,9 +524,9 @@ async function setupSolidOpenId() {
       },
     );
 
-    const requiredRole = process.env.OPENID_REQUIRED_ROLE;
-    const requiredRoleParameterPath = process.env.OPENID_REQUIRED_ROLE_PARAMETER_PATH;
-    const requiredRoleTokenKind = process.env.OPENID_REQUIRED_ROLE_TOKEN_KIND;
+    const _requiredRole = process.env.OPENID_REQUIRED_ROLE;
+    const _requiredRoleParameterPath = process.env.OPENID_REQUIRED_ROLE_PARAMETER_PATH;
+    const _requiredRoleTokenKind = process.env.OPENID_REQUIRED_ROLE_TOKEN_KIND;
     const usePKCE = isEnabled(process.env.OPENID_USE_PKCE);
     logger.info(`[SolidOpenidStrategy] OpenID authentication configuration`, {
       generateNonce: shouldGenerateNonce,
@@ -537,9 +537,9 @@ async function setupSolidOpenId() {
 
     // Set of env variables that specify how to set if a user is an admin
     // If not set, all users will be treated as regular users
-    const adminRole = process.env.OPENID_ADMIN_ROLE;
-    const adminRoleParameterPath = process.env.OPENID_ADMIN_ROLE_PARAMETER_PATH;
-    const adminRoleTokenKind = process.env.OPENID_ADMIN_ROLE_TOKEN_KIND;
+    const _adminRole = process.env.OPENID_ADMIN_ROLE;
+    const _adminRoleParameterPath = process.env.OPENID_ADMIN_ROLE_PARAMETER_PATH;
+    const _adminRoleTokenKind = process.env.OPENID_ADMIN_ROLE_TOKEN_KIND;
 
     const openidLogin = new CustomOpenIDStrategy(
       {

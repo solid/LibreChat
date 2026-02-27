@@ -168,7 +168,9 @@ const startServer = async () => {
   // Local CSS (and other Solid IdPs) fetch this URL to get redirect_uris; they must match the redirect_uri we send in the auth request.
   app.get('/solid-client-id', (_, res) => {
     const callbackPath =
-      process.env.SOLID_OPENID_CALLBACK_URL || process.env.OPENID_CALLBACK_URL || '/oauth/openid/callback';
+      process.env.SOLID_OPENID_CALLBACK_URL ||
+      process.env.OPENID_CALLBACK_URL ||
+      '/oauth/openid/callback';
     const baseUrl = process.env.DOMAIN_SERVER || 'http://localhost:3080';
     const clientId = `${baseUrl}/solid-client-id`;
     res.set('Content-Type', 'application/ld+json');

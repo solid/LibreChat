@@ -74,7 +74,14 @@ const resetPasswordController = async (req, res) => {
  * @param {string} [tokenProvider] - 'solid' or 'openid' from cookie so setOpenIDAuthTokens sets the correct token_provider cookie
  * @returns {Promise<boolean>} True if response was sent, false if caller should continue to next handler
  */
-async function performOpenIDRefresh(req, res, openIdConfig, refreshToken, refreshParams = {}, tokenProvider) {
+async function performOpenIDRefresh(
+  req,
+  res,
+  openIdConfig,
+  refreshToken,
+  refreshParams = {},
+  tokenProvider,
+) {
   try {
     const tokenset = await openIdClient.refreshTokenGrant(
       openIdConfig,
@@ -198,7 +205,9 @@ const refreshController = async (req, res) => {
             try {
               return getOpenIdConfig();
             } catch (e) {
-              logger.warn('[refreshController] OpenID config not initialized', { message: e?.message });
+              logger.warn('[refreshController] OpenID config not initialized', {
+                message: e?.message,
+              });
               return null;
             }
           })();
