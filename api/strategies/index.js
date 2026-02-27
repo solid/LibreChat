@@ -1,5 +1,9 @@
 const { setupOpenId, getOpenIdConfig, getOpenIdEmail } = require('./openidStrategy');
-const { setupSolidOpenId, getSolidOpenIdConfig } = require('./SolidOpenidStrategy');
+const {
+  setupSolidOpenIdFromProvider,
+  getSolidOpenIdConfig,
+  verifySolidUser,
+} = require('./SolidOpenidStrategy');
 const openIdJwtLogin = require('./openIdJwtStrategy');
 const facebookLogin = require('./facebookStrategy');
 const discordLogin = require('./discordStrategy');
@@ -19,11 +23,12 @@ module.exports = {
   discordLogin,
   jwtLogin,
   facebookLogin,
+  getOpenIdEmail,
+  setupSolidOpenIdFromProvider,
+  getSolidOpenIdConfig,
+  verifySolidUser,
   setupOpenId,
   getOpenIdConfig,
-  getOpenIdEmail,
-  setupSolidOpenId,
-  getSolidOpenIdConfig,
   ldapLogin,
   setupSaml,
   openIdJwtLogin,

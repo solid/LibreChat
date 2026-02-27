@@ -295,6 +295,191 @@ function convertToUsername(input, defaultValue = '') {
 }
 
 /**
+ * Verify Solid OpenID tokens and find/create user. Used by both the Passport strategy and the dynamic multi-issuer callback.
+ * @param {import('openid-client').TokenEndpointResponse & import('openid-client').TokenEndpointResponseHelpers} tokenset
+ * @param {Configuration} openidConfig
+ * @returns {Promise<Object>} User object with tokenset and federatedTokens (same shape as Passport verify callback).
+ * @throws {Error} On auth failure (email not allowed, required role missing, etc.)
+ */
+async function verifySolidUser(tokenset, openidConfig) {
+  const requiredRole = process.env.OPENID_REQUIRED_ROLE;
+  const requiredRoleParameterPath = process.env.OPENID_REQUIRED_ROLE_PARAMETER_PATH;
+  const requiredRoleTokenKind = process.env.OPENID_REQUIRED_ROLE_TOKEN_KIND;
+  const adminRole = process.env.OPENID_ADMIN_ROLE;
+  const adminRoleParameterPath = process.env.OPENID_ADMIN_ROLE_PARAMETER_PATH;
+  const adminRoleTokenKind = process.env.OPENID_ADMIN_ROLE_TOKEN_KIND;
+
+  const claims = tokenset.claims();
+  const userinfo = {
+    ...claims,
+    ...(await getUserInfo(openidConfig, tokenset.access_token, claims.sub)),
+  };
+
+  const appConfig = await getAppConfig();
+  const email =
+    userinfo.email ||
+    userinfo.preferred_username ||
+    userinfo.upn ||
+    `${userinfo.webid}@FAKEDOMAIN.TLD`;
+  if (!isEmailDomainAllowed(email, appConfig?.registration?.allowedDomains)) {
+    logger.error(
+      `[SolidOpenidStrategy] Authentication blocked - email domain not allowed [Email: ${email}]`,
+    );
+    const err = new Error('Email domain not allowed');
+    err.code = 'EMAIL_DOMAIN_NOT_ALLOWED';
+    throw err;
+  }
+
+  const result = await findOpenIDUser({
+    findUser,
+    email,
+    openidId: claims.sub,
+    idOnTheSource: claims.oid,
+    strategyName: 'SolidOpenidStrategy',
+  });
+  let user = result.user;
+  const error = result.error;
+
+  if (error) {
+    const err = new Error(ErrorTypes.AUTH_FAILED);
+    err.code = 'AUTH_FAILED';
+    throw err;
+  }
+
+  const fullName = getFullName(userinfo);
+
+  if (requiredRole) {
+    const requiredRoles = requiredRole
+      .split(',')
+      .map((role) => role.trim())
+      .filter(Boolean);
+    let decodedToken = '';
+    if (requiredRoleTokenKind === 'access') {
+      decodedToken = jwtDecode(tokenset.access_token);
+    } else if (requiredRoleTokenKind === 'id') {
+      decodedToken = jwtDecode(tokenset.id_token);
+    }
+
+    let roles = get(decodedToken, requiredRoleParameterPath);
+    if (!roles || (!Array.isArray(roles) && typeof roles !== 'string')) {
+      const rolesList =
+        requiredRoles.length === 1
+          ? `"${requiredRoles[0]}"`
+          : `one of: ${requiredRoles.map((r) => `"${r}"`).join(', ')}`;
+      throw new Error(`You must have ${rolesList} role to log in.`);
+    }
+    if (!requiredRoles.some((role) => roles.includes(role))) {
+      const rolesList =
+        requiredRoles.length === 1
+          ? `"${requiredRoles[0]}"`
+          : `one of: ${requiredRoles.map((r) => `"${r}"`).join(', ')}`;
+      throw new Error(`You must have ${rolesList} role to log in.`);
+    }
+  }
+
+  let username = '';
+  if (process.env.OPENID_USERNAME_CLAIM) {
+    username = userinfo[process.env.OPENID_USERNAME_CLAIM];
+  } else {
+    username = convertToUsername(
+      userinfo.preferred_username || userinfo.username || userinfo.email,
+    );
+  }
+
+  if (!user) {
+    user = {
+      provider: 'solid',
+      openidId: userinfo.sub,
+      username,
+      email: email || '',
+      emailVerified: userinfo.email_verified || false,
+      name: fullName,
+      idOnTheSource: userinfo.oid,
+    };
+    const balanceConfig = getBalanceConfig(appConfig);
+    user = await createUser(user, balanceConfig, true, true);
+  } else {
+    user.provider = 'solid';
+    user.openidId = userinfo.sub;
+    user.username = username;
+    user.name = fullName;
+    user.idOnTheSource = userinfo.oid;
+    if (email && email !== user.email) {
+      user.email = email;
+      user.emailVerified = userinfo.email_verified || false;
+    }
+  }
+
+  if (adminRole && adminRoleParameterPath && adminRoleTokenKind) {
+    let adminRoleObject;
+    switch (adminRoleTokenKind) {
+      case 'access':
+        adminRoleObject = jwtDecode(tokenset.access_token);
+        break;
+      case 'id':
+        adminRoleObject = jwtDecode(tokenset.id_token);
+        break;
+      case 'userinfo':
+        adminRoleObject = userinfo;
+        break;
+      default:
+        throw new Error(`Invalid admin role token kind: ${adminRoleTokenKind}`);
+    }
+    const adminRoles = get(adminRoleObject, adminRoleParameterPath);
+    if (
+      adminRoles &&
+      (adminRoles === true ||
+        adminRoles === adminRole ||
+        (Array.isArray(adminRoles) && adminRoles.includes(adminRole)))
+    ) {
+      user.role = 'ADMIN';
+    } else if (user.role === 'ADMIN') {
+      user.role = 'USER';
+    }
+  }
+
+  if (!!userinfo && userinfo.picture && !user.avatar?.includes('manual=true')) {
+    const imageUrl = userinfo.picture;
+    const crypto = require('crypto');
+    const fileName = crypto ? (await hashToken(userinfo.sub)) + '.png' : userinfo.sub + '.png';
+    const imageBuffer = await downloadImage(
+      imageUrl,
+      openidConfig,
+      tokenset.access_token,
+      userinfo.sub,
+    );
+    if (imageBuffer) {
+      const { saveBuffer } = getStrategyFunctions(
+        appConfig?.fileStrategy ?? process.env.CDN_PROVIDER,
+      );
+      const imagePath = await saveBuffer({
+        fileName,
+        userId: user._id.toString(),
+        buffer: imageBuffer,
+      });
+      user.avatar = imagePath ?? '';
+    }
+  }
+
+  user = await updateUser(user._id, user);
+
+  logger.info(
+    `[SolidOpenidStrategy] login success openidId: ${user.openidId} | email: ${user.email} | username: ${user.username}`,
+  );
+
+  return {
+    ...user,
+    provider: 'solid',
+    tokenset,
+    federatedTokens: {
+      access_token: tokenset.access_token,
+      refresh_token: tokenset.refresh_token,
+      expires_at: tokenset.expires_at,
+    },
+  };
+}
+
+/**
  * Sets up the OpenID strategy for authentication.
  * This function configures the OpenID client, handles proxy settings,
  * and defines the OpenID strategy for Passport.js.
@@ -303,6 +488,13 @@ function convertToUsername(input, defaultValue = '') {
  * @function setupOpenId
  * @returns {Promise<Configuration | null>} A promise that resolves when the OpenID strategy is set up and returns the openid client config object.
  * @throws {Error} If an error occurs during the setup process.
+ */
+/**
+ * @deprecated Use SOLID_OPENID_PROVIDERS and setupSolidOpenIdFromProvider() instead. Not used in dynamic flow.
+ * Legacy single-issuer setup using SOLID_OPENID_ISSUER (no longer supported).
+ * @async
+ * @function setupSolidOpenId
+ * @returns {Promise<Configuration | null>}
  */
 async function setupSolidOpenId() {
   try {
@@ -363,217 +555,13 @@ async function setupSolidOpenId() {
        */
       async (tokenset, done) => {
         try {
-          const claims = tokenset.claims();
-          const userinfo = {
-            ...claims,
-            ...(await getUserInfo(openidConfig, tokenset.access_token, claims.sub)),
-          };
-
-          const appConfig = await getAppConfig();
-          /** Azure AD sometimes doesn't return email, use preferred_username as fallback */
-          // TODO: jeswr - Potentially fetch an email from the user's WebID if they have a `foaf:mbox`
-          // TODO: jeswr - Can codebase support email or WebID rather than requiring email?
-          // TODO: jeswr - Suggest opening issues for these once we PR the changes upstream
-          const email =
-            userinfo.email ||
-            userinfo.preferred_username ||
-            userinfo.upn ||
-            `${userinfo.webid}@FAKEDOMAIN.TLD`;
-          if (!isEmailDomainAllowed(email, appConfig?.registration?.allowedDomains)) {
-            logger.error(
-              `[SolidOpenidStrategy] Authentication blocked - email domain not allowed [Email: ${email}]`,
-            );
-            return done(null, false, { message: 'Email domain not allowed' });
-          }
-
-          const result = await findOpenIDUser({
-            findUser,
-            email: email,
-            openidId: claims.sub,
-            idOnTheSource: claims.oid,
-            strategyName: 'SolidOpenidStrategy',
-          });
-          let user = result.user;
-          const error = result.error;
-
-          if (error) {
-            return done(null, false, {
-              message: ErrorTypes.AUTH_FAILED,
-            });
-          }
-
-          const fullName = getFullName(userinfo);
-
-          if (requiredRole) {
-            const requiredRoles = requiredRole
-              .split(',')
-              .map((role) => role.trim())
-              .filter(Boolean);
-            let decodedToken = '';
-            if (requiredRoleTokenKind === 'access') {
-              decodedToken = jwtDecode(tokenset.access_token);
-            } else if (requiredRoleTokenKind === 'id') {
-              decodedToken = jwtDecode(tokenset.id_token);
-            }
-
-            let roles = get(decodedToken, requiredRoleParameterPath);
-            if (!roles || (!Array.isArray(roles) && typeof roles !== 'string')) {
-              logger.error(
-                `[SolidOpenidStrategy] Key '${requiredRoleParameterPath}' not found or invalid type in ${requiredRoleTokenKind} token!`,
-              );
-              const rolesList =
-                requiredRoles.length === 1
-                  ? `"${requiredRoles[0]}"`
-                  : `one of: ${requiredRoles.map((r) => `"${r}"`).join(', ')}`;
-              return done(null, false, {
-                message: `You must have ${rolesList} role to log in.`,
-              });
-            }
-
-            if (!requiredRoles.some((role) => roles.includes(role))) {
-              const rolesList =
-                requiredRoles.length === 1
-                  ? `"${requiredRoles[0]}"`
-                  : `one of: ${requiredRoles.map((r) => `"${r}"`).join(', ')}`;
-              return done(null, false, {
-                message: `You must have ${rolesList} role to log in.`,
-              });
-            }
-          }
-
-          let username = '';
-          if (process.env.OPENID_USERNAME_CLAIM) {
-            username = userinfo[process.env.OPENID_USERNAME_CLAIM];
-          } else {
-            username = convertToUsername(
-              userinfo.preferred_username || userinfo.username || userinfo.email,
-            );
-          }
-
-          if (!user) {
-            user = {
-              provider: 'solid',
-              openidId: userinfo.sub,
-              username,
-              email: email || '',
-              emailVerified: userinfo.email_verified || false,
-              name: fullName,
-              idOnTheSource: userinfo.oid,
-            };
-
-            const balanceConfig = getBalanceConfig(appConfig);
-            user = await createUser(user, balanceConfig, true, true);
-          } else {
-            user.provider = 'solid';
-            user.openidId = userinfo.sub;
-            user.username = username;
-            user.name = fullName;
-            user.idOnTheSource = userinfo.oid;
-            if (email && email !== user.email) {
-              user.email = email;
-              user.emailVerified = userinfo.email_verified || false;
-            }
-          }
-
-          if (adminRole && adminRoleParameterPath && adminRoleTokenKind) {
-            let adminRoleObject;
-            switch (adminRoleTokenKind) {
-              case 'access':
-                adminRoleObject = jwtDecode(tokenset.access_token);
-                break;
-              case 'id':
-                adminRoleObject = jwtDecode(tokenset.id_token);
-                break;
-              case 'userinfo':
-                adminRoleObject = userinfo;
-                break;
-              default:
-                logger.error(
-                  `[SolidOpenidStrategy] Invalid admin role token kind: ${adminRoleTokenKind}. Must be one of 'access', 'id', or 'userinfo'.`,
-                );
-                return done(new Error('Invalid admin role token kind'));
-            }
-
-            const adminRoles = get(adminRoleObject, adminRoleParameterPath);
-
-            // Accept 3 types of values for the object extracted from adminRoleParameterPath:
-            // 1. A boolean value indicating if the user is an admin
-            // 2. A string with a single role name
-            // 3. An array of role names
-
-            if (
-              adminRoles &&
-              (adminRoles === true ||
-                adminRoles === adminRole ||
-                (Array.isArray(adminRoles) && adminRoles.includes(adminRole)))
-            ) {
-              user.role = 'ADMIN';
-              logger.info(
-                `[SolidOpenidStrategy] User ${username} is an admin based on role: ${adminRole}`,
-              );
-            } else if (user.role === 'ADMIN') {
-              user.role = 'USER';
-              logger.info(
-                `[SolidOpenidStrategy] User ${username} demoted from admin - role no longer present in token`,
-              );
-            }
-          }
-
-          if (!!userinfo && userinfo.picture && !user.avatar?.includes('manual=true')) {
-            /** @type {string | undefined} */
-            const imageUrl = userinfo.picture;
-
-            let fileName;
-            if (crypto) {
-              fileName = (await hashToken(userinfo.sub)) + '.png';
-            } else {
-              fileName = userinfo.sub + '.png';
-            }
-
-            const imageBuffer = await downloadImage(
-              imageUrl,
-              openidConfig,
-              tokenset.access_token,
-              userinfo.sub,
-            );
-            if (imageBuffer) {
-              const { saveBuffer } = getStrategyFunctions(
-                appConfig?.fileStrategy ?? process.env.CDN_PROVIDER,
-              );
-              const imagePath = await saveBuffer({
-                fileName,
-                userId: user._id.toString(),
-                buffer: imageBuffer,
-              });
-              user.avatar = imagePath ?? '';
-            }
-          }
-
-          user = await updateUser(user._id, user);
-
-          logger.info(
-            `[SolidOpenidStrategy] login success openidId: ${user.openidId} | email: ${user.email} | username: ${user.username} `,
-            {
-              user: {
-                openidId: user.openidId,
-                username: user.username,
-                email: user.email,
-                name: user.name,
-              },
-            },
-          );
-
-          done(null, {
-            ...user,
-            tokenset,
-            federatedTokens: {
-              access_token: tokenset.access_token,
-              refresh_token: tokenset.refresh_token,
-              expires_at: tokenset.expires_at,
-            },
-          });
+          const userObj = await verifySolidUser(tokenset, openidConfig);
+          done(null, userObj);
         } catch (err) {
           logger.error('[SolidOpenidStrategy] login failed', err);
+          if (err.code === 'AUTH_FAILED' || err.code === 'EMAIL_DOMAIN_NOT_ALLOWED') {
+            return done(null, false, { message: err.message });
+          }
           done(err);
         }
       },
@@ -585,6 +573,39 @@ async function setupSolidOpenId() {
     return null;
   }
 }
+
+/**
+ * Set OpenID config from a provider (e.g. first entry in SOLID_OPENID_PROVIDERS).
+ * Used when only dynamic providers are configured so getSolidOpenIdConfig() and solidJwt work.
+ * @param {{ issuer: string, clientId: string, clientSecret?: string }} provider
+ * @returns {Promise<Configuration | null>}
+ */
+async function setupSolidOpenIdFromProvider(provider) {
+  try {
+    const clientMetadata = {
+      client_id: provider.clientId,
+      client_secret: provider.clientSecret || undefined,
+    };
+    openidConfig = await client.discovery(
+      new URL(provider.issuer),
+      provider.clientId,
+      clientMetadata,
+      undefined,
+      {
+        [client.customFetch]: customFetch,
+        execute: [client.allowInsecureRequests],
+      },
+    );
+    logger.info('[SolidOpenidStrategy] OpenID config set from provider (for JWT/refresh)', {
+      issuer: provider.issuer,
+    });
+    return openidConfig;
+  } catch (err) {
+    logger.error('[SolidOpenidStrategy] setupSolidOpenIdFromProvider failed', err);
+    return null;
+  }
+}
+
 /**
  * @function getOpenIdConfig
  * @description Returns the OpenID client instance.
@@ -599,6 +620,7 @@ function getSolidOpenIdConfig() {
 }
 
 module.exports = {
-  setupSolidOpenId,
+  setupSolidOpenIdFromProvider,
   getSolidOpenIdConfig,
+  verifySolidUser,
 };
