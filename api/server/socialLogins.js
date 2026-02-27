@@ -16,7 +16,6 @@ const {
 } = require('~/strategies');
 const { getLogStores } = require('~/cache');
 const {
-  getSolidOpenIdProviders,
   getSolidOpenIdProvidersForJwt,
   isSolidOpenIdEnabled,
 } = require('./services/Config/solidOpenId');
