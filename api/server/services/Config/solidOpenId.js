@@ -4,8 +4,7 @@
  */
 
 const defaultScope = process.env.SOLID_OPENID_SCOPE || 'openid webid offline_access';
-const defaultCallbackPath =
-  process.env.SOLID_OPENID_CALLBACK_URL || '/oauth/openid/callback';
+const defaultCallbackPath = process.env.SOLID_OPENID_CALLBACK_URL || '/oauth/openid/callback';
 
 /**
  * Default display labels for known issuers (used when provider config has no label).
@@ -88,7 +87,7 @@ function getSolidOpenIdProviders() {
           callbackPath: (p.callbackPath && String(p.callbackPath).trim()) || defaultCallbackPath,
         });
       }
-    } catch (e) {
+    } catch (_e) {
       // Invalid JSON
     }
   }
@@ -154,16 +153,16 @@ function getSolidOpenIdProviderByIssuer(issuer) {
   if (configured) return configured;
 
   // Custom issuer: use SOLID_OPENID_CUSTOM_* if set and URL is allowed
-  if (
-    process.env.SOLID_OPENID_CUSTOM_CLIENT_ID &&
-    isAllowedCustomIssuer(normalized)
-  ) {
+  if (process.env.SOLID_OPENID_CUSTOM_CLIENT_ID && isAllowedCustomIssuer(normalized)) {
     return {
       issuer: normalized,
       clientId: process.env.SOLID_OPENID_CUSTOM_CLIENT_ID,
       clientSecret: process.env.SOLID_OPENID_CUSTOM_CLIENT_SECRET || '',
       scope: process.env.SOLID_OPENID_CUSTOM_SCOPE || defaultScope,
-      label: KNOWN_ISSUER_LABELS[normalized] || KNOWN_ISSUER_LABELS[normalized.replace(/\/$/, '')] || 'Custom',
+      label:
+        KNOWN_ISSUER_LABELS[normalized] ||
+        KNOWN_ISSUER_LABELS[normalized.replace(/\/$/, '')] ||
+        'Custom',
       callbackPath: defaultCallbackPath,
     };
   }

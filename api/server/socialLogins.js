@@ -15,7 +15,11 @@ const {
   setupSaml,
 } = require('~/strategies');
 const { getLogStores } = require('~/cache');
-const { getSolidOpenIdProviders, getSolidOpenIdProvidersForJwt, isSolidOpenIdEnabled } = require('./services/Config/solidOpenId');
+const {
+  getSolidOpenIdProviders,
+  getSolidOpenIdProvidersForJwt,
+  isSolidOpenIdEnabled,
+} = require('./services/Config/solidOpenId');
 const { ensureSolidJwtRegistered } = require('./services/ensureSolidJwt');
 
 /**
@@ -74,7 +78,9 @@ async function configureSolidOpenIdFromProviders(app) {
 
   const config = await setupSolidOpenIdFromProvider(providers[0]);
   if (!config) {
-    logger.warn('[configureSolidOpenIdFromProviders] Discovery for first provider failed - solidJwt not registered.');
+    logger.warn(
+      '[configureSolidOpenIdFromProviders] Discovery for first provider failed - solidJwt not registered.',
+    );
     return;
   }
   passport.use('solidJwt', openIdJwtLogin(config));
@@ -142,11 +148,7 @@ const configureSocialLogins = async (app) => {
   }
   // Solid: dynamic providers only (SOLID_OPENID_PROVIDERS or SOLID_OPENID_CUSTOM_CLIENT_ID). Session + solidJwt from first provider.
   const solidProvidersForJwt = getSolidOpenIdProvidersForJwt();
-  const solidProvidersFromEnv = getSolidOpenIdProviders();
-  if (
-    process.env.SOLID_OPENID_SESSION_SECRET &&
-    solidProvidersForJwt.length > 0
-  ) {
+  if (process.env.SOLID_OPENID_SESSION_SECRET && solidProvidersForJwt.length > 0) {
     await configureSolidOpenIdFromProviders(app);
   } else if (solidProvidersForJwt.length > 0) {
     await registerSolidJwtFromProviders();

@@ -12,6 +12,8 @@ import {
 } from '@librechat/client';
 import type { TStartupConfig } from 'librechat-data-provider';
 
+import { useLocalize, TranslationKeys } from '~/hooks';
+
 type SolidLoginButtonProps = {
   startupConfig: TStartupConfig;
   label: string;
@@ -34,6 +36,7 @@ function isValidIssuerUrl(url: string): boolean {
  * Redirects to serverDomain + '/oauth/openid?issuer=' + encodeURIComponent(selectedIssuer)
  */
 function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps) {
+  const localize = useLocalize();
   const [open, setOpen] = useState(false);
   const [providerUrl, setProviderUrl] = useState('');
   const [selectedOptionIssuer, setSelectedOptionIssuer] = useState<string | null>(null);
@@ -47,7 +50,9 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
   const canContinue =
     serverDomain &&
     !!trimmedUrl &&
-    (customEnabled ? isValidIssuerUrl(trimmedUrl) : options.some((opt) => opt.issuer === trimmedUrl));
+    (customEnabled
+      ? isValidIssuerUrl(trimmedUrl)
+      : options.some((opt) => opt.issuer === trimmedUrl));
 
   const handleSelectOption = (issuer: string) => {
     setSelectedOptionIssuer(issuer);
@@ -88,23 +93,22 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
         </OGDialogTrigger>
         <OGDialogContent className="max-w-md">
           <OGDialogHeader>
-            <OGDialogTitle>Choose Solid Identity Provider</OGDialogTitle>
+            <OGDialogTitle>
+              {localize('com_auth_solid_idp_modal_title' as TranslationKeys)}
+            </OGDialogTitle>
             <OGDialogDescription>
-              Enter your provider URL or pick one of the providers below.
+              {localize('com_auth_solid_idp_modal_description' as TranslationKeys)}
             </OGDialogDescription>
           </OGDialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label
-                htmlFor="solid-idp-url"
-                className="text-sm font-medium text-text-primary"
-              >
-                Solid Identity Provider
+              <label htmlFor="solid-idp-url" className="text-sm font-medium text-text-primary">
+                {localize('com_auth_solid_idp_label' as TranslationKeys)}
               </label>
               <input
                 id="solid-idp-url"
                 type="url"
-                placeholder="Enter your provider URL"
+                placeholder={localize('com_auth_solid_idp_placeholder' as TranslationKeys)}
                 value={providerUrl}
                 onChange={(e) => {
                   setProviderUrl(e.target.value);
@@ -120,7 +124,7 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
             {options.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-medium text-text-secondary">
-                  Or select a provider:
+                  {localize('com_auth_solid_select_provider' as TranslationKeys)}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {options.map((opt) => {
@@ -146,10 +150,10 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
           </div>
           <OGDialogFooter>
             <OGDialogClose asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button variant="outline">{localize('com_ui_cancel' as TranslationKeys)}</Button>
             </OGDialogClose>
             <Button onClick={handleContinue} disabled={!canContinue}>
-              Continue
+              {localize('com_auth_continue' as TranslationKeys)}
             </Button>
           </OGDialogFooter>
         </OGDialogContent>

@@ -68,8 +68,14 @@ async function startSolidOpenIdFlow(req, res, next) {
 
   const provider = getSolidOpenIdProviderByIssuer(issuer.trim());
   if (!provider) {
-    logger.warn('[solidOpenIdDynamic] Unknown or unconfigured issuer', { issuer: issuer.slice(0, 80) });
-    res.status(400).send('Unknown or unconfigured Solid Identity Provider. Use one of the options from the login page.');
+    logger.warn('[solidOpenIdDynamic] Unknown or unconfigured issuer', {
+      issuer: issuer.slice(0, 80),
+    });
+    res
+      .status(400)
+      .send(
+        'Unknown or unconfigured Solid Identity Provider. Use one of the options from the login page.',
+      );
     return;
   }
 
@@ -151,10 +157,13 @@ async function handleSolidOpenIdCallback(req, res, next) {
   if (!code) {
     const errParam = req.query.error;
     const errDesc = req.query.error_description;
-    logger.warn('[solidOpenIdDynamic] Callback missing code - IdP likely rejected the auth request', {
-      error: errParam,
-      error_description: errDesc,
-    });
+    logger.warn(
+      '[solidOpenIdDynamic] Callback missing code - IdP likely rejected the auth request',
+      {
+        error: errParam,
+        error_description: errDesc,
+      },
+    );
     res.redirect(`${process.env.DOMAIN_CLIENT}/login?redirect=false&error=auth_failed`);
     return;
   }
@@ -190,19 +199,12 @@ async function handleSolidOpenIdCallback(req, res, next) {
       discoveryOptions,
     );
 
-    const currentUrl = new URL(
-      req.originalUrl || req.url,
-      process.env.DOMAIN_SERVER,
-    );
+    const currentUrl = new URL(req.originalUrl || req.url, process.env.DOMAIN_SERVER);
 
-    const tokenset = await client.authorizationCodeGrant(
-      config,
-      currentUrl,
-      {
-        expectedState: state,
-        ...(sessionData.code_verifier && { pkceCodeVerifier: sessionData.code_verifier }),
-      },
-    );
+    const tokenset = await client.authorizationCodeGrant(config, currentUrl, {
+      expectedState: state,
+      ...(sessionData.code_verifier && { pkceCodeVerifier: sessionData.code_verifier }),
+    });
 
     delete req.session[SESSION_KEY][state];
     req.session.save(() => {});
