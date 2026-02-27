@@ -12,8 +12,6 @@ import {
 } from '@librechat/client';
 import type { TStartupConfig } from 'librechat-data-provider';
 
-const CUSTOM_VALUE = '__custom__';
-
 type SolidLoginButtonProps = {
   startupConfig: TStartupConfig;
   label: string;
@@ -32,23 +30,29 @@ function isValidIssuerUrl(url: string): boolean {
 }
 
 /**
- * Solid login button that opens an IdP selection modal (3 default options + optional custom URL),
- * then redirects to serverDomain + '/oauth/openid?issuer=' + encodeURIComponent(selectedIssuer)
+ * Solid login button that opens an IdP selection modal: URL input + optional provider pills.
+ * Redirects to serverDomain + '/oauth/openid?issuer=' + encodeURIComponent(selectedIssuer)
  */
 function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps) {
   const [open, setOpen] = useState(false);
-  const [selectedIssuer, setSelectedIssuer] = useState<string | null>(null);
-  const [customUrl, setCustomUrl] = useState('');
+  const [providerUrl, setProviderUrl] = useState('');
+  const [selectedOptionIssuer, setSelectedOptionIssuer] = useState<string | null>(null);
 
   const options = startupConfig.solidIdpOptions ?? [];
   const customEnabled = startupConfig.solidCustomEnabled === true;
   const serverDomain = startupConfig.serverDomain || '';
 
-  const isCustomSelected = selectedIssuer === CUSTOM_VALUE;
-  const effectiveIssuer = isCustomSelected ? customUrl.trim() : selectedIssuer;
+  const trimmedUrl = providerUrl.trim();
+  const effectiveIssuer = trimmedUrl;
   const canContinue =
     serverDomain &&
-    (isCustomSelected ? isValidIssuerUrl(customUrl) : !!selectedIssuer && selectedIssuer !== CUSTOM_VALUE);
+    !!trimmedUrl &&
+    (customEnabled ? isValidIssuerUrl(trimmedUrl) : options.some((opt) => opt.issuer === trimmedUrl));
+
+  const handleSelectOption = (issuer: string) => {
+    setSelectedOptionIssuer(issuer);
+    setProviderUrl(issuer);
+  };
 
   const handleContinue = () => {
     if (!canContinue || !effectiveIssuer) return;
@@ -59,8 +63,8 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) {
-      setSelectedIssuer(null);
-      setCustomUrl('');
+      setProviderUrl('');
+      setSelectedOptionIssuer(null);
     }
   };
 
@@ -86,61 +90,58 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
           <OGDialogHeader>
             <OGDialogTitle>Choose Solid Identity Provider</OGDialogTitle>
             <OGDialogDescription>
-              Select a provider or enter your own Solid OIDC provider URL.
+              Enter your provider URL or pick one of the providers below.
             </OGDialogDescription>
           </OGDialogHeader>
-          <div className="py-4 space-y-3">
-            <ul className="space-y-2">
-              {options.map((opt) => (
-                <li key={opt.issuer}>
-                  <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border-light p-3 transition-colors hover:bg-surface-secondary has-[:checked]:border-green-500 has-[:checked]:bg-surface-secondary dark:has-[:checked]:border-green-500">
-                    <input
-                      type="radio"
-                      name="solid-issuer"
-                      value={opt.issuer}
-                      checked={selectedIssuer === opt.issuer}
-                      onChange={() => setSelectedIssuer(opt.issuer)}
-                      className="h-4 w-4 border-gray-300 text-green-600 focus:ring-green-500"
-                    />
-                    <span className="font-medium text-text-primary">{opt.label}</span>
-                    {opt.issuer !== opt.label && (
-                      <span
-                        className="max-w-[180px] truncate text-xs text-gray-500 dark:text-gray-400"
-                        title={opt.issuer}
-                      >
-                        {opt.issuer}
-                      </span>
-                    )}
-                  </label>
-                </li>
-              ))}
-            </ul>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label
+                htmlFor="solid-idp-url"
+                className="text-sm font-medium text-text-primary"
+              >
+                Solid Identity Provider
+              </label>
+              <input
+                id="solid-idp-url"
+                type="url"
+                placeholder="Enter your provider URL"
+                value={providerUrl}
+                onChange={(e) => {
+                  setProviderUrl(e.target.value);
+                  if (selectedOptionIssuer && e.target.value.trim() !== selectedOptionIssuer) {
+                    setSelectedOptionIssuer(null);
+                  }
+                }}
+                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-gray-500 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 dark:placeholder:text-gray-400 dark:bg-surface-secondary"
+                data-testid="solid-custom-url"
+              />
+            </div>
 
-            {customEnabled && (
-              <>
-                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border-light p-3 transition-colors hover:bg-surface-secondary has-[:checked]:border-green-500 has-[:checked]:bg-surface-secondary dark:has-[:checked]:border-green-500">
-                  <input
-                    type="radio"
-                    name="solid-issuer"
-                    value={CUSTOM_VALUE}
-                    checked={isCustomSelected}
-                    onChange={() => setSelectedIssuer(CUSTOM_VALUE)}
-                    className="mt-1 h-4 w-4 border-gray-300 text-green-600 focus:ring-green-500"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="font-medium text-text-primary block mb-1">Custom provider</span>
-                    <input
-                      type="url"
-                      placeholder="https://your-pod.example.com/"
-                      value={customUrl}
-                      onChange={(e) => setCustomUrl(e.target.value)}
-                      onFocus={() => setSelectedIssuer(CUSTOM_VALUE)}
-                      className="w-full rounded border border-border-light bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-gray-500 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 dark:bg-surface-secondary"
-                      data-testid="solid-custom-url"
-                    />
-                  </div>
-                </label>
-              </>
+            {options.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-text-secondary">
+                  Or select a provider:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {options.map((opt) => {
+                    const isSelected = providerUrl.trim() === opt.issuer;
+                    return (
+                      <button
+                        key={opt.issuer}
+                        type="button"
+                        onClick={() => handleSelectOption(opt.issuer)}
+                        className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                          isSelected
+                            ? 'border-green-500 bg-surface-secondary text-text-primary'
+                            : 'border-border-light bg-surface-primary text-text-primary hover:bg-surface-tertiary'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
           <OGDialogFooter>
