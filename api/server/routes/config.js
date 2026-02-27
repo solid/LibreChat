@@ -96,9 +96,7 @@ router.get('/', async function (req, res) {
         ? [
             ...DEFAULT_ISSUER_OPTIONS,
             ...getSolidOpenIdProviders()
-              .filter((p) =>
-                !DEFAULT_ISSUER_OPTIONS.some((d) => normalizeIssuer(d.issuer) === p.issuer),
-              )
+              .filter((p) => !DEFAULT_ISSUER_OPTIONS.some((d) => normalizeIssuer(d.issuer) === p.issuer))
               .map((p) => ({ issuer: p.issuer, label: p.label })),
           ]
         : [],

@@ -116,7 +116,7 @@ function SolidLoginButton({ startupConfig, label, Icon }: SolidLoginButtonProps)
                     setSelectedOptionIssuer(null);
                   }
                 }}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-gray-500 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 bg-surface-secondary dark:placeholder:text-gray-400"
+                className="w-full rounded-lg border border-border-light bg-surface-primary bg-surface-secondary px-3 py-2.5 text-sm text-text-primary placeholder:text-gray-500 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 dark:placeholder:text-gray-400"
                 data-testid="solid-custom-url"
               />
             </div>
