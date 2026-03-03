@@ -157,6 +157,14 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
   - **solidcommunity.net**: The IdP dereferences the client_id URL; a localhost client_id is not reachable. Use a public URL for production.
   - **SOLID_OPENID_SCOPE**: Use `"openid webid offline_access"` for refresh token support when the IdP supports it.
 
+### 17. Solid Profile (WebID Card) Email and Name
+- **Status**: Complete
+- **Details**:
+  - **Profile fetch**: After Solid login, when `userinfo.webid` and an access token is available, we fetch the user's WebID profile document (Turtle) from the profile URL derived from the WebID (strip fragment, e.g. `https://pod.example.com/profile/card#me` → `https://pod.example.com/profile/card`). Request uses `Authorization: Bearer` and `Accept: text/turtle` with a 5s timeout; PROXY is respected.
+  - **Email and name extraction**: We parse the Turtle with **n3** (no regex). Email is read from the subject's `vcard:hasEmail` → object node → that node's `vcard:value` (mailto: URI); name from `vcard:fn` (preferred) or `foaf:name`. Uses **N3.Store** and **DataFactory.namedNode()** for lookups so matching is term-based and maintainable.
+  - **Integration**: `getSolidProfileFromWebId(webIdUrl, accessToken)` returns `{ email?, name? }`; best-effort (returns `{}` on fetch/parse failure). In `verifySolidUser`, we call it when `userinfo.webid` and `tokenset.access_token` exist and merge `profile.email` and `profile.name` into `userinfo`, so the real email is used instead of `...@FAKEDOMAIN.TLD` when the profile contains it, and the name appears in the UI. `getFullName(userinfo)` now considers `userinfo.name` (from profile) before given_name/family_name.
+  - **UI**: The client sidebar and account popover already display `user.name` and `user.email` from the API; no client changes were required.
+
 ## Current Status
 
 ### Working Features
@@ -175,6 +183,7 @@ Successfully implemented Solid Pod storage integration for LibreChat, enabling u
 13. **Conversation Delete**: Users can delete conversations and all associated messages from Solid Pod
 14. **Conversation Archive**: Users can archive and unarchive conversations stored in Solid Pod
 15. **Conversation Share**: Users can share conversations stored in Solid Pod with public read access while maintaining full write permissions
+16. **Solid profile email/name**: When the user's WebID profile card (vCard/FOAF) contains email and/or name, these are fetched after login and used for the LibreChat user (sidebar and account popover show real email and name instead of faked email)
 
 ### Known Issues 🔧
 None currently identified.
@@ -211,6 +220,7 @@ None currently identified.
 - **Authorization request**: Solid flow sends `prompt=consent` and `scope=openid webid offline_access` so IdPs that support it can issue a refresh token.
 - **JWT strategies**: Solid uses `solidJwt`, generic OpenID uses `openidJwt`; `requireJwtAuth` and `optionalJwtAuth` select the strategy based on the `token_provider` cookie. The cookie is set from `req.user.provider` in `setOpenIDAuthTokens`; the refresh path passes `token_provider` into `performOpenIDRefresh` and sets `req.user`/`user.provider` so the cookie is not overwritten to `openid` after refresh.
 - **JWT extraction**: The openIdJwt/solidJwt strategy reads the JWT from `Authorization: Bearer` first, then from the `openid_id_token` cookie, so the first request after redirect can authenticate before the frontend sets the header. We set the `openid_id_token` cookie when storing tokens in session so that fallback works.
+- **Solid profile (WebID card)**: When a user logs in with Solid, we optionally fetch their WebID profile document (Turtle) using the access token, parse it with n3 (Store + DataFactory), and extract `vcard:fn`/`foaf:name` for display name and `vcard:hasEmail` → `vcard:value` (mailto:) for email. This replaces the faked `...@FAKEDOMAIN.TLD` email and improves the displayed name when the profile card contains them. Best-effort; failures do not block login.
 
 ### Access Control (ACL)
 - Uses manual ACL Turtle format for permission management
@@ -246,7 +256,7 @@ None currently identified.
 - `api/server/controllers/AuthController.js` - performOpenIDRefresh accepts tokenProvider param; sets req.user and user.provider before setOpenIDAuthTokens so token_provider cookie preserved on refresh; session fallback when no refresh token; Solid vs openid by token_provider
 - `api/server/middleware/requireJwtAuth.js` - Use solidJwt when token_provider is solid, openidJwt when openid; lazy solidJwt registration; sendStrategyNotRegistered503 from openIdAuthHelpers
 - `api/server/middleware/optionalJwtAuth.js` - Same strategy selection and 503 helper as requireJwtAuth
-- `api/strategies/SolidOpenidStrategy.js` - verifySolidUser return includes provider: 'solid'; prompt=consent for refresh token; SOLID_OPENID_* env; register as 'solid'
+- `api/strategies/SolidOpenidStrategy.js` - verifySolidUser return includes provider: 'solid'; prompt=consent for refresh token; SOLID_OPENID_* env; register as 'solid'; **getSolidProfileFromWebId**: fetch WebID profile (Turtle), parse with n3 Store + DataFactory, extract vcard:fn/foaf:name and vcard:hasEmail→value (mailto:); merge into userinfo so real email/name used; getFullName considers userinfo.name
 - `api/strategies/openIdJwtStrategy.js` - jwtFromRequest: Authorization Bearer then openid_id_token cookie; used by solidJwt and openidJwt
 - `api/server/controllers/auth/solidOpenIdDynamic.js` - startSolidOpenIdFlow, handleSolidOpenIdCallback (multi-issuer with PKCE)
 - `api/server/middleware/validate/convoAccess.js` - Solid storage support for conversation access validation

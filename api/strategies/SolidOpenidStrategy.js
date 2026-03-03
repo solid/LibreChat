@@ -5,6 +5,7 @@ const passport = require('passport');
 const client = require('openid-client');
 const jwtDecode = require('jsonwebtoken/decode');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const { Parser, Store, DataFactory } = require('n3');
 const { hashToken, logger } = require('@librechat/data-schemas');
 const { CacheKeys, ErrorTypes } = require('librechat-data-provider');
 const { Strategy: OpenIDStrategy } = require('openid-client/passport');
@@ -244,6 +245,121 @@ const downloadImage = async (url, config, accessToken, sub) => {
   }
 };
 
+const VCARD_NS = 'http://www.w3.org/2006/vcard/ns#';
+const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
+
+/**
+ * Fetches the Solid profile document (WebID card) and extracts email and name from vCard/FOAF.
+ * Uses n3 for Turtle parsing (no regex). Best-effort: returns {} on any failure.
+ * @param {string} webIdUrl - The user's WebID (e.g. https://pod.example.com/profile/card#me)
+ * @param {string} accessToken - Bearer access token from Solid OIDC
+ * @returns {Promise<{ email?: string, name?: string }>}
+ */
+async function getSolidProfileFromWebId(webIdUrl, accessToken) {
+  if (!webIdUrl || typeof webIdUrl !== 'string' || !accessToken) {
+    return {};
+  }
+  const webId = webIdUrl.trim();
+  let profileDocUrl;
+  try {
+    const u = new URL(webId);
+    u.hash = '';
+    profileDocUrl = u.href;
+  } catch {
+    return {};
+  }
+
+  const fetchOptions = {
+    method: 'GET',
+    headers: {
+      Accept: 'text/turtle',
+      Authorization: `Bearer ${accessToken}`,
+    },
+  };
+  if (process.env.PROXY) {
+    fetchOptions.agent = new HttpsProxyAgent(process.env.PROXY);
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  fetchOptions.signal = controller.signal;
+
+  let text;
+  try {
+    const response = await fetch(profileDocUrl, fetchOptions);
+    clearTimeout(timeoutId);
+    if (!response.ok) {
+      logger.debug(
+        `[SolidOpenidStrategy] getSolidProfileFromWebId: profile fetch failed ${response.status} ${profileDocUrl}`,
+      );
+      return {};
+    }
+    text = await response.text();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    logger.debug(
+      `[SolidOpenidStrategy] getSolidProfileFromWebId: fetch error ${err.message} ${profileDocUrl}`,
+    );
+    return {};
+  }
+
+  let quads;
+  try {
+    const parser = new Parser({ baseIRI: profileDocUrl });
+    quads = parser.parse(text);
+  } catch (err) {
+    logger.debug(
+      `[SolidOpenidStrategy] getSolidProfileFromWebId: Turtle parse error ${err.message}`,
+    );
+    return {};
+  }
+
+  const { namedNode } = DataFactory;
+  const store = new Store(quads);
+  const subjectIri = webId;
+  const subjectTerm = namedNode(subjectIri);
+  const hasEmailPred = VCARD_NS + 'hasEmail';
+  const valuePred = VCARD_NS + 'value';
+  const fnPred = VCARD_NS + 'fn';
+  const foafNamePred = FOAF_NS + 'name';
+
+  let name;
+  const fnQuads = store.getQuads(subjectTerm, namedNode(fnPred), null, null);
+  if (fnQuads.length > 0 && fnQuads[0].object.termType === 'Literal' && fnQuads[0].object.value) {
+    name = fnQuads[0].object.value;
+  } else {
+    const foafNameQuads = store.getQuads(subjectTerm, namedNode(foafNamePred), null, null);
+    if (
+      foafNameQuads.length > 0 &&
+      foafNameQuads[0].object.termType === 'Literal' &&
+      foafNameQuads[0].object.value
+    ) {
+      name = foafNameQuads[0].object.value;
+    }
+  }
+
+  let email;
+  const hasEmailQuads = store.getQuads(subjectTerm, namedNode(hasEmailPred), null, null);
+  for (const q of hasEmailQuads) {
+    const emailNode = q.object;
+    const valueQuads = store.getQuads(emailNode, namedNode(valuePred), null, null);
+    for (const vq of valueQuads) {
+      if (
+        vq.object.termType === 'NamedNode' &&
+        vq.object.value.startsWith('mailto:')
+      ) {
+        email = vq.object.value.slice(7).trim();
+        break;
+      }
+    }
+    if (email) break;
+  }
+
+  const out = {};
+  if (email) out.email = email;
+  if (name) out.name = name;
+  return out;
+}
+
 /**
  * Determines the full name of a user based on OpenID userinfo and environment configuration.
  *
@@ -252,11 +368,16 @@ const downloadImage = async (url, config, accessToken, sub) => {
  * @param {string} [userinfo.family_name] - The user's last name
  * @param {string} [userinfo.username] - The user's username
  * @param {string} [userinfo.email] - The user's email address
+ * @param {string} [userinfo.name] - Full name (e.g. from Solid profile vcard:fn)
  * @returns {string} The determined full name of the user
  */
 function getFullName(userinfo) {
   if (process.env.OPENID_NAME_CLAIM) {
     return userinfo[process.env.OPENID_NAME_CLAIM];
+  }
+
+  if (userinfo.name) {
+    return userinfo.name;
   }
 
   if (userinfo.given_name && userinfo.family_name) {
@@ -314,6 +435,12 @@ async function verifySolidUser(tokenset, openidConfig) {
     ...claims,
     ...(await getUserInfo(openidConfig, tokenset.access_token, claims.sub)),
   };
+
+  if (userinfo.webid && tokenset.access_token) {
+    const profile = await getSolidProfileFromWebId(userinfo.webid, tokenset.access_token);
+    if (profile.email) userinfo.email = profile.email;
+    if (profile.name) userinfo.name = profile.name;
+  }
 
   const appConfig = await getAppConfig();
   const email =
