@@ -343,10 +343,7 @@ async function getSolidProfileFromWebId(webIdUrl, accessToken) {
     const emailNode = q.object;
     const valueQuads = store.getQuads(emailNode, namedNode(valuePred), null, null);
     for (const vq of valueQuads) {
-      if (
-        vq.object.termType === 'NamedNode' &&
-        vq.object.value.startsWith('mailto:')
-      ) {
+      if (vq.object.termType === 'NamedNode' && vq.object.value.startsWith('mailto:')) {
         email = vq.object.value.slice(7).trim();
         break;
       }

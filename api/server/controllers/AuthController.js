@@ -18,7 +18,7 @@ const {
   findUser,
 } = require('~/models');
 const { getGraphApiToken } = require('~/server/services/GraphTokenService');
-const { getOpenIdConfig, getOpenIdEmail } = require('~/strategies');
+const { getOpenIdConfig, getSolidOpenIdConfig, getOpenIdEmail } = require('~/strategies');
 
 const registrationController = async (req, res) => {
   try {
@@ -97,29 +97,29 @@ async function performOpenIDRefresh(
       strategyName: 'refreshController',
     });
 
-      logger.debug(
-        `[refreshController] findOpenIDUser result: user=${user?.email ?? 'null'}, error=${error ?? 'null'}, migration=${migration}, userOpenidId=${user?.openidId ?? 'null'}, claimsSub=${claims.sub}`,
+    logger.debug(
+      `[refreshController] findOpenIDUser result: user=${user?.email ?? 'null'}, error=${error ?? 'null'}, migration=${migration}, userOpenidId=${user?.openidId ?? 'null'}, claimsSub=${claims.sub}`,
+    );
+
+    if (error || !user) {
+      logger.warn(
+        `[refreshController] Redirecting to /login: error=${error ?? 'null'}, user=${user ? 'exists' : 'null'}`,
       );
+      return res.status(401).redirect('/login');
+    }
 
-      if (error || !user) {
-        logger.warn(
-          `[refreshController] Redirecting to /login: error=${error ?? 'null'}, user=${user ? 'exists' : 'null'}`,
-        );
-        return res.status(401).redirect('/login');
-      }
-
-      // Handle migration: update user with openidId if found by email without openidId
-      // Also handle case where user has mismatched openidId (e.g., after database switch)
-      if (migration || user.openidId !== claims.sub) {
-        const reason = migration ? 'migration' : 'openidId mismatch';
-        await updateUser(user._id.toString(), {
-          provider: user.provider || 'openid',
-          openidId: claims.sub,
-        });
-        logger.info(
-          `[refreshController] Updated user ${user.email} openidId (${reason}): ${user.openidId ?? 'null'} -> ${claims.sub}`,
-        );
-      }
+    // Handle migration: update user with openidId if found by email without openidId
+    // Also handle case where user has mismatched openidId (e.g., after database switch)
+    if (migration || user.openidId !== claims.sub) {
+      const reason = migration ? 'migration' : 'openidId mismatch';
+      await updateUser(user._id.toString(), {
+        provider: user.provider || 'openid',
+        openidId: claims.sub,
+      });
+      logger.info(
+        `[refreshController] Updated user ${user.email} openidId (${reason}): ${user.openidId ?? 'null'} -> ${claims.sub}`,
+      );
+    }
 
     // setOpenIDAuthTokens sets token_provider cookie correctly (solid vs openid)
     req.user = user;
@@ -127,14 +127,14 @@ async function performOpenIDRefresh(
       user.provider = user.provider || tokenProvider;
     }
 
-      const token = setOpenIDAuthTokens(tokenset, req, res, user._id.toString(), refreshToken);
+    const token = setOpenIDAuthTokens(tokenset, req, res, user._id.toString(), refreshToken);
 
-      user.federatedTokens = {
-        access_token: tokenset.access_token,
-        id_token: tokenset.id_token,
-        refresh_token: refreshToken,
-        expires_at: claims.exp,
-      };
+    user.federatedTokens = {
+      access_token: tokenset.access_token,
+      id_token: tokenset.id_token,
+      refresh_token: refreshToken,
+      expires_at: claims.exp,
+    };
 
     res.status(200).send({ token, user });
     return true;
