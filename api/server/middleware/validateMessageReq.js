@@ -1,6 +1,7 @@
 const { getConvo } = require('~/models');
 
-// Middleware to validate conversationId and user relationship
+// Middleware to validate conversationId and user relationship.
+// getConvo(user, conversationId, req) handles Solid vs MongoDB internally.
 const validateMessageReq = async (req, res, next) => {
   let conversationId = req.params.conversationId || req.body.conversationId;
 
@@ -12,8 +13,7 @@ const validateMessageReq = async (req, res, next) => {
     conversationId = req.body.message.conversationId;
   }
 
-  const conversation = await getConvo(req.user.id, conversationId);
-
+  const conversation = await getConvo(req.user.id, conversationId, req);
   if (!conversation) {
     return res.status(404).json({ error: 'Conversation not found' });
   }

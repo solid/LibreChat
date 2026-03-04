@@ -6,7 +6,9 @@ const { getOpenIdConfig } = require('~/strategies');
 
 const logoutController = async (req, res) => {
   const parsedCookies = req.headers.cookie ? cookies.parse(req.headers.cookie) : {};
-  const isOpenIdUser = req.user?.openidId != null && req.user?.provider === 'openid';
+  const isOpenIdUser =
+    req.user?.openidId != null &&
+    (req.user?.provider === 'openid' || req.user?.provider === 'solid');
 
   /** For OpenID users, read tokens from session (with cookie fallback) */
   let refreshToken;

@@ -2,6 +2,12 @@ const { z } = require('zod');
 const { logger } = require('@librechat/data-schemas');
 const { createTempChatExpirationDate } = require('@librechat/api');
 const { Message } = require('~/db/models');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
+const {
+  saveMessageToSolid,
+  updateMessageInSolid,
+  deleteMessagesFromSolid,
+} = require('~/server/services/SolidStorage');
 
 const idSchema = z.string().uuid();
 
@@ -47,33 +53,53 @@ async function saveMessage(req, params, metadata) {
     return;
   }
 
-  try {
-    const update = {
-      ...params,
-      user: req.user.id,
-      messageId: params.newMessageId || params.messageId,
-    };
-
-    if (req?.body?.isTemporary) {
-      try {
-        const appConfig = req.config;
-        update.expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
-      } catch (err) {
-        logger.error('Error creating temporary chat expiration date:', err);
-        logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-        update.expiredAt = null;
-      }
-    } else {
-      update.expiredAt = null;
-    }
-
-    if (update.tokenCount != null && isNaN(update.tokenCount)) {
-      logger.warn(
-        `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${update.tokenCount}`,
-      );
+  // Build shared payload once: messageId, expiredAt, tokenCount
+  let expiredAt = null;
+  if (req?.body?.isTemporary) {
+    try {
+      const appConfig = req.config;
+      expiredAt = createTempChatExpirationDate(appConfig?.interfaceConfig);
+    } catch (err) {
+      logger.error('Error creating temporary chat expiration date:', err);
       logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
-      update.tokenCount = 0;
     }
+  }
+  const messageId = params.newMessageId || params.messageId;
+  let tokenCount = params.tokenCount;
+  if (tokenCount != null && isNaN(tokenCount)) {
+    logger.warn(
+      `Resetting invalid \`tokenCount\` for message \`${params.messageId}\`: ${tokenCount}`,
+    );
+    logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+    tokenCount = 0;
+  }
+  const baseMessage = {
+    ...params,
+    messageId,
+    expiredAt,
+    tokenCount: tokenCount ?? 0,
+  };
+
+  if (isSolidUser(req)) {
+    try {
+      // Full document aligned with schema (same shape as MongoDB); SolidStorage only persists it
+      const messageDocument = {
+        ...baseMessage,
+        user: req.user.id,
+        createdAt: baseMessage.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const savedMessage = await saveMessageToSolid(req, messageDocument, metadata);
+      return savedMessage;
+    } catch (err) {
+      logger.error('Error saving message to Solid Pod:', err);
+      logger.info(`---\`saveMessage\` context: ${metadata?.context}`);
+      throw err;
+    }
+  }
+
+  try {
+    const update = { ...baseMessage, user: req.user.id };
     const message = await Message.findOneAndUpdate(
       { messageId: params.messageId, user: req.user.id },
       update,
@@ -237,6 +263,31 @@ async function updateMessageText(req, { messageId, text }) {
  * @throws {Error} If there is an error in updating the message or if the message is not found.
  */
 async function updateMessage(req, message, metadata) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
+    try {
+      const updatedMessage = await updateMessageInSolid(req, message, metadata);
+
+      return {
+        messageId: updatedMessage.messageId,
+        conversationId: updatedMessage.conversationId,
+        parentMessageId: updatedMessage.parentMessageId,
+        sender: updatedMessage.sender,
+        text: updatedMessage.text,
+        isCreatedByUser: updatedMessage.isCreatedByUser,
+        tokenCount: updatedMessage.tokenCount,
+        feedback: updatedMessage.feedback,
+      };
+    } catch (err) {
+      logger.error('Error updating message in Solid Pod:', err);
+      if (metadata && metadata?.context) {
+        logger.info(`---\`updateMessage\` context: ${metadata.context}`);
+      }
+      throw err;
+    }
+  }
+
+  // MongoDB storage (original code)
   try {
     const { messageId, ...update } = message;
     const updatedMessage = await Message.findOneAndUpdate(
@@ -283,6 +334,21 @@ async function updateMessage(req, message, metadata) {
  * @throws {Error} If there is an error in deleting messages.
  */
 async function deleteMessagesSince(req, { messageId, conversationId }) {
+  // Use Solid storage when user logged in via "Continue with Solid"
+  if (isSolidUser(req)) {
+    try {
+      const deletedCount = await deleteMessagesFromSolid(req, {
+        messageId,
+        conversationId,
+      });
+      return { deletedCount };
+    } catch (err) {
+      logger.error('Error deleting messages from Solid Pod:', err);
+      throw err;
+    }
+  }
+
+  // MongoDB storage (original code)
   try {
     const message = await Message.findOne({ messageId, user: req.user.id }).lean();
 
@@ -309,6 +375,9 @@ async function deleteMessagesSince(req, { messageId, conversationId }) {
  * @throws {Error} If there is an error in retrieving messages.
  */
 async function getMessages(filter, select) {
+  // Note: getMessages doesn't have access to req, so it can't use Solid storage
+  // For Solid storage, use getMessagesFromSolid directly from routes/controllers that have req
+  // MongoDB storage (original code)
   try {
     if (select) {
       return await Message.find(filter).select(select).sort({ createdAt: 1 }).lean();

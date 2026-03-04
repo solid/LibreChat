@@ -448,9 +448,13 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
 
     const refreshToken = tokenset.refresh_token || existingRefreshToken;
 
+    // Log warning if no refresh token, but continue with access token only
+    // Some providers (like Solid) may not provide refresh tokens
     if (!refreshToken) {
-      logger.error('[setOpenIDAuthTokens] No refresh token available');
-      return;
+      logger.warn('[setOpenIDAuthTokens] No refresh token available - will use access token only', {
+        hasAccessToken: !!tokenset.access_token,
+        provider: req.user?.provider,
+      });
     }
 
     /**
@@ -463,37 +467,28 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
     const appAuthToken = tokenset.id_token || tokenset.access_token;
 
     /**
-     * Always set refresh token cookie so it survives express session expiry.
-     * The session cookie maxAge (SESSION_EXPIRY, default 15 min) is typically shorter
-     * than the OIDC token lifetime (~1 hour). Without this cookie fallback, the refresh
-     * token stored only in the session is lost when the session expires, causing the user
-     * to be signed out on the next token refresh attempt.
-     * The refresh token is small (opaque string) so it doesn't hit the HTTP/2 header
-     * size limits that motivated session storage for the larger access_token/id_token.
+     * Set refresh token cookie when available so it survives express session expiry.
+     * Some providers (e.g. Solid) may not issue refresh tokens; then we rely on session only.
      */
-    res.cookie('refreshToken', refreshToken, {
-      expires: expirationDate,
-      httpOnly: true,
-      secure: shouldUseSecureCookie(),
-      sameSite: 'strict',
-    });
+    if (refreshToken) {
+      res.cookie('refreshToken', refreshToken, {
+        expires: expirationDate,
+        httpOnly: true,
+        secure: shouldUseSecureCookie(),
+        sameSite: 'strict',
+      });
+    }
 
     /** Store tokens server-side in session to avoid large cookies */
     if (req.session) {
       req.session.openidTokens = {
         accessToken: tokenset.access_token,
         idToken: tokenset.id_token,
-        refreshToken: refreshToken,
+        refreshToken: refreshToken || null, // Store null if no refresh token
         expiresAt: expirationDate.getTime(),
       };
-    } else {
-      logger.warn('[setOpenIDAuthTokens] No session available, falling back to cookies');
-      res.cookie('openid_access_token', tokenset.access_token, {
-        expires: expirationDate,
-        httpOnly: true,
-        secure: shouldUseSecureCookie(),
-        sameSite: 'strict',
-      });
+
+      // Set id_token cookie as well so first API request (before frontend refresh sets Authorization header) can authenticate
       if (tokenset.id_token) {
         res.cookie('openid_id_token', tokenset.id_token, {
           expires: expirationDate,
@@ -502,10 +497,60 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
           sameSite: 'strict',
         });
       }
+
+      // Explicitly save the session to ensure it persists
+      req.session.save((err) => {
+        if (err) {
+          logger.error('[setOpenIDAuthTokens] Error saving session', {
+            error: err.message,
+            stack: err.stack,
+          });
+        } else {
+          logger.debug('[setOpenIDAuthTokens] Session saved successfully');
+        }
+      });
+
+      logger.info('[setOpenIDAuthTokens] Tokens stored in session', {
+        hasAccessToken: !!tokenset.access_token,
+        hasRefreshToken: !!refreshToken,
+        sessionId: req.sessionID,
+        accessTokenLength: tokenset.access_token?.length,
+        expiresAt: expirationDate.toISOString(),
+      });
+    } else {
+      logger.warn('[setOpenIDAuthTokens] No session available, falling back to cookies');
+      if (refreshToken) {
+        res.cookie('refreshToken', refreshToken, {
+          expires: expirationDate,
+          httpOnly: true,
+          secure: shouldUseSecureCookie(),
+          sameSite: 'strict',
+        });
+      }
+      res.cookie('openid_access_token', tokenset.access_token, {
+        expires: expirationDate,
+        httpOnly: true,
+        secure: shouldUseSecureCookie(),
+        sameSite: 'strict',
+      });
+
+      if (tokenset.id_token) {
+        res.cookie('openid_id_token', tokenset.id_token, {
+          expires: expirationDate,
+          httpOnly: true,
+          secure: shouldUseSecureCookie(),
+          sameSite: 'strict',
+        });
+      }
+      logger.info('[setOpenIDAuthTokens] Tokens stored in cookies', {
+        hasAccessToken: !!tokenset.access_token,
+        hasRefreshToken: !!refreshToken,
+      });
     }
 
-    /** Small cookie to indicate token provider (required for auth middleware) */
-    res.cookie('token_provider', 'openid', {
+    /** Small cookie to indicate token provider (required for auth middleware and refresh flow) */
+    const tokenProvider = req.user?.provider || 'openid';
+    res.cookie('token_provider', tokenProvider, {
       expires: expirationDate,
       httpOnly: true,
       secure: shouldUseSecureCookie(),

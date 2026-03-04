@@ -18,6 +18,7 @@ const requireJwtAuth = require('~/server/middleware/requireJwtAuth');
 const { importConversations } = require('~/server/utils/import');
 const { deleteToolCalls } = require('~/models/ToolCall');
 const getLogStores = require('~/cache/getLogStores');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const assistantClients = {
   [EModelEndpoint.azureAssistants]: require('~/server/services/Endpoints/azureAssistants'),
@@ -44,6 +45,7 @@ router.get('/', async (req, res) => {
     const result = await getConvosByCursor(req.user.id, {
       cursor,
       limit,
+      req, // Pass req for Solid storage support
       isArchived,
       tags,
       search,
@@ -52,19 +54,53 @@ router.get('/', async (req, res) => {
     });
     res.status(200).json(result);
   } catch (error) {
-    logger.error('Error fetching conversations', error);
-    res.status(500).json({ error: 'Error fetching conversations' });
+    logger.error('Error fetching conversations', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      isSolidUser: isSolidUser(req),
+    });
+    res.status(500).json({
+      error: 'Error fetching conversations',
+      message: error.message, // Include actual error message for debugging
+    });
   }
 });
 
 router.get('/:conversationId', async (req, res) => {
   const { conversationId } = req.params;
-  const convo = await getConvo(req.user.id, conversationId);
 
-  if (convo) {
-    res.status(200).json(convo);
-  } else {
-    res.status(404).end();
+  logger.info('[GET /api/convos/:conversationId] Fetching conversation', {
+    conversationId,
+    userId: req.user?.id,
+    isSolidUser: isSolidUser(req),
+  });
+
+  try {
+    const convo = await getConvo(req.user.id, conversationId, req);
+
+    if (convo) {
+      logger.info('[GET /api/convos/:conversationId] Conversation found', {
+        conversationId,
+        title: convo.title,
+        messageCount: convo.messages?.length || 0,
+      });
+      res.status(200).json(convo);
+    } else {
+      logger.warn('[GET /api/convos/:conversationId] Conversation not found', {
+        conversationId,
+        userId: req.user?.id,
+      });
+      res.status(404).end();
+    }
+  } catch (error) {
+    logger.error('[GET /api/convos/:conversationId] Error fetching conversation', {
+      conversationId,
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+    });
+    res.status(500).json({ error: 'Error fetching conversation', message: error.message });
   }
 });
 
@@ -128,10 +164,10 @@ router.delete('/', async (req, res) => {
   }
 
   try {
-    const dbResponse = await deleteConvos(req.user.id, filter);
+    const dbResponse = await deleteConvos(req.user.id, filter, req); // Pass req for Solid storage support
     if (filter.conversationId) {
       await deleteToolCalls(req.user.id, filter.conversationId);
-      await deleteConvoSharedLink(req.user.id, filter.conversationId);
+      await deleteConvoSharedLink(req.user.id, filter.conversationId, req);
     }
     res.status(201).json(dbResponse);
   } catch (error) {
@@ -142,7 +178,7 @@ router.delete('/', async (req, res) => {
 
 router.delete('/all', async (req, res) => {
   try {
-    const dbResponse = await deleteConvos(req.user.id, {});
+    const dbResponse = await deleteConvos(req.user.id, {}, req); // Pass req for Solid storage support
     await deleteToolCalls(req.user.id);
     await deleteAllSharedLinks(req.user.id);
     res.status(201).json(dbResponse);
@@ -288,6 +324,7 @@ router.post('/duplicate', async (req, res) => {
       userId: req.user.id,
       conversationId,
       title,
+      req, // Pass req for Solid storage support
     });
     res.status(201).json(result);
   } catch (error) {

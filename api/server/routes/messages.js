@@ -15,6 +15,8 @@ const { findAllArtifacts, replaceArtifactContent } = require('~/server/services/
 const { requireJwtAuth, validateMessageReq } = require('~/server/middleware');
 const { getConvosQueried } = require('~/models/Conversation');
 const { Message } = require('~/db/models');
+const { getMessagesFromSolid } = require('~/server/services/SolidStorage');
+const { isSolidUser } = require('~/server/utils/isSolidUser');
 
 const router = express.Router();
 router.use(requireJwtAuth);
@@ -40,28 +42,82 @@ router.get('/', async (req, res) => {
     const sortOrder = sortDirection === 'asc' ? 1 : -1;
 
     if (conversationId && messageId) {
-      const message = await Message.findOne({
-        conversationId,
-        messageId,
-        user: user,
-      }).lean();
-      response = { messages: message ? [message] : [], nextCursor: null };
+      if (isSolidUser(req)) {
+        try {
+          const allMessages = await getMessagesFromSolid(req, conversationId);
+          const message = allMessages.find((m) => m.messageId === messageId);
+          response = { messages: message ? [message] : [], nextCursor: null };
+        } catch (error) {
+          logger.error('Error getting message from Solid Pod', error);
+          return res.status(503).json({
+            error: 'Failed to load from Solid Pod',
+            message: 'Solid storage is temporarily unavailable. Please try again.',
+          });
+        }
+      } else {
+        // MongoDB storage
+        const message = await Message.findOne({
+          conversationId,
+          messageId,
+          user: user,
+        }).lean();
+        response = { messages: message ? [message] : [], nextCursor: null };
+      }
     } else if (conversationId) {
-      const filter = { conversationId, user: user };
-      if (cursor) {
-        filter[sortField] = sortOrder === 1 ? { $gt: cursor } : { $lt: cursor };
+      // Use Solid storage when user logged in via "Continue with Solid"
+      if (isSolidUser(req)) {
+        try {
+          const allMessages = await getMessagesFromSolid(req, conversationId);
+
+          // Apply sorting
+          allMessages.sort((a, b) => {
+            const aVal = a[sortField] || 0;
+            const bVal = b[sortField] || 0;
+            return sortOrder === 1 ? aVal - bVal : bVal - aVal;
+          });
+
+          // Apply cursor filtering if provided
+          let filteredMessages = allMessages;
+          if (cursor) {
+            filteredMessages = allMessages.filter((msg) => {
+              const msgVal = msg[sortField] || 0;
+              return sortOrder === 1 ? msgVal > cursor : msgVal < cursor;
+            });
+          }
+
+          // Apply pagination
+          const messages = filteredMessages.slice(0, pageSize + 1);
+          let nextCursor = null;
+          if (messages.length > pageSize) {
+            messages.pop(); // Remove extra item used to detect next page
+            // Create cursor from the last RETURNED item (not the popped one)
+            nextCursor = messages[messages.length - 1][sortField];
+          }
+          response = { messages, nextCursor };
+        } catch (error) {
+          logger.error('Error getting messages from Solid Pod', error);
+          return res.status(503).json({
+            error: 'Failed to load from Solid Pod',
+            message: 'Solid storage is temporarily unavailable. Please try again.',
+          });
+        }
+      } else {
+        const filter = { conversationId, user: user };
+        if (cursor) {
+          filter[sortField] = sortOrder === 1 ? { $gt: cursor } : { $lt: cursor };
+        }
+        const messages = await Message.find(filter)
+          .sort({ [sortField]: sortOrder })
+          .limit(pageSize + 1)
+          .lean();
+        let nextCursor = null;
+        if (messages.length > pageSize) {
+          messages.pop(); // Remove extra item used to detect next page
+          // Create cursor from the last RETURNED item (not the popped one)
+          nextCursor = messages[messages.length - 1][sortField];
+        }
+        response = { messages, nextCursor };
       }
-      const messages = await Message.find(filter)
-        .sort({ [sortField]: sortOrder })
-        .limit(pageSize + 1)
-        .lean();
-      let nextCursor = null;
-      if (messages.length > pageSize) {
-        messages.pop(); // Remove extra item used to detect next page
-        // Create cursor from the last RETURNED item (not the popped one)
-        nextCursor = messages[messages.length - 1][sortField];
-      }
-      response = { messages, nextCursor };
     } else if (search) {
       const searchResults = await Message.meiliSearch(search, { filter: `user = "${user}"` }, true);
 
@@ -283,6 +339,23 @@ router.post('/artifact/:messageId', async (req, res) => {
 router.get('/:conversationId', validateMessageReq, async (req, res) => {
   try {
     const { conversationId } = req.params;
+
+    if (isSolidUser(req)) {
+      try {
+        const messages = await getMessagesFromSolid(req, conversationId);
+        const cleanedMessages = messages.map((msg) => {
+          const { _id, __v, user: _user, ...rest } = msg;
+          return rest;
+        });
+        return res.status(200).json(cleanedMessages);
+      } catch (error) {
+        logger.error('Error getting messages from Solid Pod', error);
+        return res.status(503).json({
+          error: 'Failed to load from Solid Pod',
+          message: 'Solid storage is temporarily unavailable. Please try again.',
+        });
+      }
+    }
     const messages = await getMessages({ conversationId }, '-_id -__v -user');
     res.status(200).json(messages);
   } catch (error) {

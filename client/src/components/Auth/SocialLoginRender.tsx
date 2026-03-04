@@ -2,6 +2,7 @@ import {
   GoogleIcon,
   FacebookIcon,
   OpenIDIcon,
+  SolidIcon,
   GithubIcon,
   DiscordIcon,
   AppleIcon,
@@ -9,8 +10,9 @@ import {
 } from '@librechat/client';
 
 import SocialButton from './SocialButton';
+import SolidLoginButton from './SolidLoginButton';
 
-import { useLocalize } from '~/hooks';
+import { useLocalize, TranslationKeys } from '~/hooks';
 
 import { TStartupConfig } from 'librechat-data-provider';
 
@@ -98,6 +100,20 @@ function SocialLoginRender({
         id="openid"
       />
     ),
+    solid: startupConfig.solidLoginEnabled && (
+      <SolidLoginButton
+        key="solid"
+        startupConfig={startupConfig}
+        label={startupConfig.solidLabel}
+        Icon={() =>
+          startupConfig.solidImageUrl ? (
+            <img src={startupConfig.solidImageUrl} alt="Solid Logo" className="h-5 w-5" />
+          ) : (
+            <SolidIcon />
+          )
+        }
+      />
+    ),
     saml: startupConfig.samlLoginEnabled && (
       <SocialButton
         key="saml"
@@ -124,7 +140,7 @@ function SocialLoginRender({
           <>
             <div className="relative mt-6 flex w-full items-center justify-center border border-t border-gray-300 uppercase dark:border-gray-600">
               <div className="absolute bg-white px-3 text-xs text-black dark:bg-gray-900 dark:text-white">
-                Or
+                {localize('com_auth_or' as TranslationKeys)}
               </div>
             </div>
             <div className="mt-8" />

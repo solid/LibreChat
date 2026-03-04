@@ -100,15 +100,36 @@ router.get('/link/:conversationId', requireJwtAuth, async (req, res) => {
 router.post('/:conversationId', requireJwtAuth, async (req, res) => {
   try {
     const { targetMessageId } = req.body;
-    const created = await createSharedLink(req.user.id, req.params.conversationId, targetMessageId);
+
+    // Check if createSharedLink exists
+    if (typeof createSharedLink !== 'function') {
+      logger.error('[share route] createSharedLink is not a function');
+      return res.status(500).json({ message: 'Share service not available' });
+    }
+
+    const created = await createSharedLink(
+      req.user.id,
+      req.params.conversationId,
+      targetMessageId,
+      req,
+    );
+
     if (created) {
       res.status(200).json(created);
     } else {
       res.status(404).end();
     }
   } catch (error) {
-    logger.error('Error creating shared link:', error);
-    res.status(500).json({ message: 'Error creating shared link' });
+    logger.error('Error creating shared link:', {
+      error: error?.message || String(error),
+      errorName: error?.name,
+      errorCode: error?.code,
+      stack: error?.stack,
+      userId: req.user?.id,
+      conversationId: req.params?.conversationId,
+    });
+    const errorMessage = error?.message || error?.code || 'Error creating shared link';
+    res.status(500).json({ message: errorMessage });
   }
 });
 
@@ -128,7 +149,7 @@ router.patch('/:shareId', requireJwtAuth, async (req, res) => {
 
 router.delete('/:shareId', requireJwtAuth, async (req, res) => {
   try {
-    const result = await deleteSharedLink(req.user.id, req.params.shareId);
+    const result = await deleteSharedLink(req.user.id, req.params.shareId, req);
 
     if (!result) {
       return res.status(404).json({ message: 'Share not found' });
