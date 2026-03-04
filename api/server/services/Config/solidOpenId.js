@@ -20,7 +20,6 @@ const KNOWN_ISSUER_LABELS = {
 
 /** Issuer URLs for the 3 default options shown in the login modal. */
 const DEFAULT_ISSUER_OPTIONS = [
-  { issuer: 'http://localhost:3000/', label: 'Local CSS' },
   { issuer: 'https://solidcommunity.net/', label: 'Solid Community' },
   { issuer: 'https://login.inrupt.com/', label: 'Inrupt' },
 ];
